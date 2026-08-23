@@ -50,6 +50,35 @@ local function LayoutToggle(parent, widgets, index, options)
   return checkbox
 end
 
+-- ---------------------------------------------------------------------------
+-- Cast without leaving your form (QtUI's unshiftToCast).
+--
+-- This is a client setting, not something QtUiPlus can implement: the client
+-- decides whether casting a non-form spell cancels the current shapeshift.
+-- "autoUnshift" is the Vanilla 1.12 CVar name and is NOT verified on this
+-- client -- emberveil.org/wiki/lua/globals/Settings documents SetCVar/GetCVar
+-- but the wiki does not enumerate CVar names. SetCVar on a name this client
+-- does not know is harmless, so the toggle is offered; if it turns out to do
+-- nothing in game, this comment is the place to start.
+-- ---------------------------------------------------------------------------
+local UNSHIFT_CVAR = "autoUnshift"
+
+local function GetUnshift()
+  local get = U.G("GetCVar")
+  if type(get) ~= "function" then return true end
+  local ok, value = pcall(get, UNSHIFT_CVAR)
+  if not ok or value == nil then return true end
+  return value ~= "0" and value ~= 0
+end
+
+local function SetUnshift(enabled)
+  local set = U.G("SetCVar")
+  if type(set) ~= "function" then return end
+  local value = "0"
+  if enabled then value = "1" end
+  pcall(set, UNSHIFT_CVAR, value)
+end
+
 local function BuildPage(parent)
   local widgets = {}
   local boxes = {}
@@ -112,7 +141,29 @@ local function BuildPage(parent)
                   "only the values, for a shorter strip.",
   })
 
-  boxes.estimateMobHealth = LayoutToggle(parent, widgets, 8, {
+  -- Not a layout key: this one reads and writes a client CVar, so it gets its
+  -- own checkbox rather than going through LayoutToggle.
+  local unshift = U.CreateCheckbox(parent, {
+    name = "QtUiPlusQtSettingsUnshift",
+    text = "Cast without leaving your form",
+    value = GetUnshift(),
+    onChange = function(value) SetUnshift(value) end,
+  })
+  unshift.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, ROW_START - 8 * ROW_STEP)
+  table.insert(widgets, unshift)
+
+  local unshiftHint = U.CreateSettingsLabel(parent, {
+    size = M.fontSize.small, color = M.color.textDim,
+    inherits = "GameFontNormalSmall", justify = "LEFT",
+  })
+  if unshiftHint then
+    U.AnchorSettingsDescription(unshiftHint, unshift.box)
+    unshiftHint:SetText("Druids and shamans: cast a spell without cancelling " ..
+                        "your current form first. This is a client setting.")
+    table.insert(widgets, unshiftHint)
+  end
+
+  boxes.estimateMobHealth = LayoutToggle(parent, widgets, 9, {
     key = "estimateMobHealth",
     text = "Enemy health from creature table",
     description = "Resolves real hit points for enemies the client reports " ..
@@ -135,7 +186,7 @@ local function BuildPage(parent)
       end
     end,
   })
-  meter.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, ROW_START - 8 * ROW_STEP)
+  meter.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, ROW_START - 10 * ROW_STEP)
   table.insert(widgets, meter)
   boxes.damageMeter = meter
 
@@ -163,6 +214,7 @@ local function BuildPage(parent)
       end
     end
     boxes.damageMeter.SetValue(U.ModuleConfig("damagemeter", { enabled = true }).enabled)
+    unshift.SetValue(GetUnshift())
   end
 
   return widgets, Refresh
