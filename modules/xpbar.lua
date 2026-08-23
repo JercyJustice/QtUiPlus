@@ -18,9 +18,25 @@ local M = U.media
 
 local XP = U.RegisterModule("xpbar")
 
+-- Shipped geometry; the settings below override it. Kept as the defaults so
+-- there is one source of truth for "how big is this normally".
 local WIDTH = 300
 local HEIGHT = 7
 local GAP = 3
+
+local LIMITS = {
+  width    = { min = 80, max = 800, step = 2 },
+  height   = { min = 4,  max = 32,  step = 1 },
+  fontSize = { min = 8,  max = 18,  step = 1 },
+}
+
+local DEFAULTS = {
+  repEnabled = true,
+  width      = WIDTH,
+  height     = HEIGHT,
+  showText   = false,
+  fontSize   = 10,
+}
 
 local COLOR_XP = { 0.55, 0.32, 0.87, 1.00 }
 local COLOR_XP_RESTED = { 0.30, 0.20, 0.55, 1.00 }
@@ -29,28 +45,49 @@ local COLOR_REP_EMPTY = { 0.35, 0.35, 0.35, 1.00 }
 
 local config
 local xpAnchor, xpBar, xpRestedBar
+local xpLabelLayer, xpLabel
 local repAnchor, repBar
 
 -- ---------------------------------------------------------------------------
 -- Config
 -- ---------------------------------------------------------------------------
 local function EnsureConfig()
-  if not config then config = U.ModuleConfig("xpbar", { repEnabled = true }) end
+  if not config then config = U.ModuleConfig("xpbar", DEFAULTS) end
   return config
 end
+
+local function Clamp(name, value)
+  local limit = LIMITS[name]
+  value = tonumber(value)
+  if not limit then return value end
+  if not value then return limit.min end
+  value = U.Round(value)
+  if value < limit.min then value = limit.min end
+  if value > limit.max then value = limit.max end
+  return value
+end
+
+local function Number(name)
+  EnsureConfig()
+  return Clamp(name, config[name])
+end
+
+local function BarWidth() return Number("width") end
+local function BarHeight() return Number("height") end
+local function ShowText() return config and config.showText and true or false end
 
 -- ---------------------------------------------------------------------------
 -- Build
 -- ---------------------------------------------------------------------------
 local function BuildBar(name, fillColor)
   local anchor = CreateFrame("Frame", name, UIParent)
-  anchor:SetWidth(WIDTH)
-  anchor:SetHeight(HEIGHT)
+  anchor:SetWidth(BarWidth())
+  anchor:SetHeight(BarHeight())
   U.CreateBackdrop(anchor, { background = M.color.healthBg })
 
   local bar = U.CreateStatusBar(anchor, {
-    width = WIDTH - 2 * U.BorderSize(),
-    height = HEIGHT - 2 * U.BorderSize(),
+    width = BarWidth() - 2 * U.BorderSize(),
+    height = BarHeight() - 2 * U.BorderSize(),
     color = fillColor,
     background = { 0, 0, 0, 0 },
   })
@@ -116,8 +153,8 @@ local function Build()
   -- The rested portion sits behind the current-xp fill on its own bar, at a
   -- lower frame level, so it reads as an extension rather than covering it.
   xpRestedBar = U.CreateStatusBar(xpAnchor, {
-    width = WIDTH - 2 * U.BorderSize(),
-    height = HEIGHT - 2 * U.BorderSize(),
+    width = BarWidth() - 2 * U.BorderSize(),
+    height = BarHeight() - 2 * U.BorderSize(),
     color = COLOR_XP_RESTED,
     background = { 0, 0, 0, 0 },
   })
@@ -136,6 +173,22 @@ local function Build()
     default = { point = "BOTTOM", relativePoint = "BOTTOM", x = 0, y = 66 },
   })
 
+  -- The readout sits on its own child layer above both fills: the fills are
+  -- sibling frames whose width changes on every refresh, and a label on the
+  -- same layer can end up behind them.
+  xpLabelLayer = CreateFrame("Frame", nil, xpAnchor)
+  xpLabelLayer:SetAllPoints(xpAnchor)
+  local layerOk, layerLevel = pcall(xpBar.GetFrameLevel, xpBar)
+  if layerOk and tonumber(layerLevel) then
+    pcall(xpLabelLayer.SetFrameLevel, xpLabelLayer, layerLevel + 5)
+  end
+  xpLabel = U.CreateLabel(xpLabelLayer, {
+    size = M.fontSize.small,
+    color = M.color.text,
+    inherits = "GameFontNormalSmall",
+  })
+  if xpLabel then xpLabel:SetPoint("CENTER", xpLabelLayer, "CENTER", 0, 0) end
+
   xpAnchor:EnableMouse(true)
   xpAnchor:SetScript("OnEnter", XPTooltipShow)
   xpAnchor:SetScript("OnLeave", XPTooltipHide)
@@ -145,10 +198,49 @@ local function Build()
   U.RegisterMover("xpbar.reputation", repAnchor, {
     label = "Reputation Bar",
     default = { point = "BOTTOM", relativePoint = "BOTTOM", x = 0, y = 66 - HEIGHT - GAP },
+    -- The default offset uses the shipped HEIGHT rather than the configured
+    -- one on purpose: a stored position must not move because a slider did.
     -- A disabled bar keeps its stored position but offers no drag handle in
     -- edit mode; see core/mover.lua / modules/microbar.lua.
     visible = function() return config and config.repEnabled end,
   })
+end
+
+-- Re-applies the configured geometry to bars that already exist. The fill is
+-- derived from the bar's own GetWidth (core/style.lua) with no public
+-- recompute call, so the current value is written back after each resize --
+-- otherwise a resized bar keeps drawing its previous fill width.
+local function ResizeBar(anchor, bar)
+  if not anchor then return end
+  local border = U.BorderSize()
+  anchor:SetWidth(BarWidth())
+  anchor:SetHeight(BarHeight())
+  if not bar then return end
+  bar:SetWidth(BarWidth() - 2 * border)
+  bar:SetHeight(BarHeight() - 2 * border)
+  if bar.GetValue and bar.SetValue then
+    local ok, value = pcall(bar.GetValue, bar)
+    if ok then pcall(bar.SetValue, bar, value) end
+  end
+end
+
+local function ApplyGeometry()
+  ResizeBar(xpAnchor, xpBar)
+  if xpRestedBar then
+    local border = U.BorderSize()
+    xpRestedBar:SetWidth(BarWidth() - 2 * border)
+    xpRestedBar:SetHeight(BarHeight() - 2 * border)
+    if xpRestedBar.GetValue and xpRestedBar.SetValue then
+      local ok, value = pcall(xpRestedBar.GetValue, xpRestedBar)
+      if ok then pcall(xpRestedBar.SetValue, xpRestedBar, value) end
+    end
+  end
+  ResizeBar(repAnchor, repBar)
+
+  if xpLabel then
+    U.SetFont(xpLabel, Number("fontSize"))
+    if ShowText() then xpLabel:Show() else xpLabel:Hide() end
+  end
 end
 
 -- ---------------------------------------------------------------------------
@@ -199,6 +291,19 @@ local function RefreshXP()
     xpRestedBar:Show()
   else
     xpRestedBar:Hide()
+  end
+
+  if xpLabel then
+    if ShowText() then
+      local percent = 0
+      if xpmax > 0 then percent = math.floor(xp / xpmax * 100 + 0.5) end
+      local text = xp .. " / " .. xpmax .. "  (" .. percent .. "%)"
+      if rested > 0 then text = text .. "  |cff8878c8+" .. rested .. "|r" end
+      xpLabel:SetText(text)
+      xpLabel:Show()
+    else
+      xpLabel:Hide()
+    end
   end
 end
 
@@ -253,6 +358,7 @@ end
 -- Public so modules/settings.lua's General page can flip the checkbox without
 -- reaching into this module's internals.
 function U.ApplyXPBar()
+  ApplyGeometry()
   RefreshXP()
   RefreshReputation()
 end
@@ -260,8 +366,102 @@ end
 -- ---------------------------------------------------------------------------
 -- Registration
 -- ---------------------------------------------------------------------------
+-- ---------------------------------------------------------------------------
+-- Settings
+-- ---------------------------------------------------------------------------
+function U.XPBarLimits(name)
+  local limit = LIMITS[name]
+  if not limit then return nil end
+  return limit.min, limit.max, limit.step
+end
+
+function U.GetXPBarSetting(name)
+  EnsureConfig()
+  if name == "repEnabled" or name == "showText" then
+    return config[name] and true or false
+  end
+  return Number(name)
+end
+
+function U.SetXPBarSetting(name, value)
+  EnsureConfig()
+  if name == "repEnabled" or name == "showText" then
+    config[name] = value and true or false
+  else
+    if not LIMITS[name] then return nil end
+    config[name] = Clamp(name, value)
+  end
+  U.ApplyXPBar()
+  return U.GetXPBarSetting(name)
+end
+
+local XP_SLIDERS = {
+  { key = "width",    text = "Bar Width" },
+  { key = "height",   text = "Bar Height" },
+  { key = "fontSize", text = "Text Size" },
+}
+
+local function BuildSettingsPage(parent)
+  local widgets, controls = {}, {}
+
+  local header = U.CreateSectionHeader(parent, {
+    text = "Experience Bar", width = 484, y = -4,
+  })
+  table.insert(widgets, header)
+
+  local text = U.CreateCheckbox(parent, {
+    name = "QtUiPlusXPBarText",
+    text = "Show experience text on the bar",
+    value = U.GetXPBarSetting("showText"),
+    onChange = function(value) U.SetXPBarSetting("showText", value) end,
+  })
+  text.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -34)
+  table.insert(widgets, text)
+
+  local rep = U.CreateCheckbox(parent, {
+    name = "QtUiPlusXPBarRep",
+    text = "Show reputation bar",
+    value = U.GetXPBarSetting("repEnabled"),
+    onChange = function(value) U.SetXPBarSetting("repEnabled", value) end,
+  })
+  rep.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -58)
+  table.insert(widgets, rep)
+
+  local i
+  for i = 1, table.getn(XP_SLIDERS) do
+    local spec = XP_SLIDERS[i]
+    local minimum, maximum, step = U.XPBarLimits(spec.key)
+    local slider = U.CreateSlider(parent, {
+      name = "QtUiPlusXPBar" .. spec.key,
+      text = spec.text,
+      width = 200,
+      min = minimum, max = maximum, step = step,
+      value = U.GetXPBarSetting(spec.key),
+      onChange = function(value) U.SetXPBarSetting(spec.key, value) end,
+    })
+    slider.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -102 - (i - 1) * 44)
+    controls[spec.key] = slider
+    table.insert(widgets, slider)
+  end
+
+  local function Refresh()
+    text.SetValue(U.GetXPBarSetting("showText"))
+    rep.SetValue(U.GetXPBarSetting("repEnabled"))
+    local j
+    for j = 1, table.getn(XP_SLIDERS) do
+      local key = XP_SLIDERS[j].key
+      if controls[key] then controls[key].SetValue(U.GetXPBarSetting(key)) end
+    end
+  end
+
+  return widgets, Refresh
+end
+
 function XP:OnInit()
   EnsureConfig()
+  if type(U.RegisterSettingsTab) == "function" then
+    U.RegisterSettingsTab("xpbar", "Experience Bar", BuildSettingsPage)
+  end
 end
 
 function XP:OnEnable()
@@ -284,6 +484,5 @@ function XP:OnEnable()
     RefreshReputation()
   end)
 
-  RefreshXP()
-  RefreshReputation()
+  U.ApplyXPBar()
 end

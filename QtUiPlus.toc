@@ -64,4 +64,5 @@ modules\damagemeter.lua
 modules\chatextras.lua
 modules\profiles.lua
 modules\combopoints.lua
+modules\energytick.lua
 modules\qtsettings.lua
