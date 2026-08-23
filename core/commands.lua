@@ -96,6 +96,7 @@ local function ShowHelp()
   U.Print("  |cffffff00/qtp check|r - runtime self-check")
   U.Print("  |cffffff00/qtp elite|r - cycle the classification icon test")
   U.Print("  |cffffff00/qtp np|r - dump WorldFrame children (nameplates)")
+  U.Print("  |cffffff00/qtp roll|r - dump the group loot roll window")
   U.Print("  |cffffff00/qtp aura|r - dump the aura rows and why a timer is missing")
   U.Print("  |cffffff00/qtp res|r - dump the Character sheet resistance frames")
   U.Print("  |cffffff00/qtp movertest|r - foundation mover smoke test")
@@ -898,6 +899,112 @@ handlers["check"]  = function() ShowSelfCheck() end
 handlers["help"]   = function() ShowHelp() end
 handlers["movertest"] = function() ShowMoverTest() end
 handlers["np"] = function() ShowNameplateDump() end
+
+-- /qtp roll -- what the group loot roll window is actually made of.
+--
+-- A bar with a health readout across it ("Dead", "1.5k - 96%") keeps appearing
+-- inside the card. USER_CONFIRMED_INGAME it is in the roll window; nothing
+-- modules/lootroll.lua draws puts it there, and guessing from screenshots has
+-- cost several releases. This prints the frame's children and regions with
+-- their type, size, text and anchor, so whatever owns that bar is named rather
+-- than inferred. Run it while a roll is on screen.
+local rollDump = {}
+
+function rollDump.Try(object, method, a)
+  if not object or type(object[method]) ~= "function" then return nil end
+  local ok, value = pcall(object[method], object, a)
+  if not ok then return nil end
+  return value
+end
+
+function rollDump.Describe(object, label)
+  local kind = rollDump.Try(object, "GetObjectType") or "?"
+  local name = rollDump.Try(object, "GetName") or "<unnamed>"
+  local w = tonumber(rollDump.Try(object, "GetWidth"))
+  local h = tonumber(rollDump.Try(object, "GetHeight"))
+  local line = label .. " " .. tostring(name) .. " [" .. tostring(kind) .. "]" ..
+               " " .. tostring(w and math.floor(w) or "?") .. "x" ..
+               tostring(h and math.floor(h) or "?")
+
+  local shown = rollDump.Try(object, "IsShown")
+  if shown ~= nil then
+    line = line .. (shown and " shown" or " hidden")
+  end
+
+  local text = rollDump.Try(object, "GetText")
+  if type(text) == "string" and text ~= "" then
+    line = line .. ' text="' .. text .. '"'
+  end
+
+  if type(object.GetPoint) == "function" then
+    local ok, point, relative, relativePoint, x, y = pcall(object.GetPoint, object)
+    if ok and point then
+      local rel = "<nil>"
+      if relative then rel = rollDump.Try(relative, "GetName") or "<unnamed>" end
+      line = line .. " @" .. tostring(point) .. "->" .. rel .. ":" ..
+             tostring(relativePoint) .. " " ..
+             tostring(x and math.floor(x) or 0) .. "," ..
+             tostring(y and math.floor(y) or 0)
+    end
+  end
+
+  local strata = rollDump.Try(object, "GetFrameStrata")
+  if strata then
+    line = line .. " " .. tostring(strata) ..
+           "/" .. tostring(rollDump.Try(object, "GetFrameLevel") or "?")
+  end
+
+  U.Print(line)
+end
+
+local function ShowLootRollDump()
+  local i
+  for i = 1, 4 do
+    local name = "GroupLootFrame" .. i
+    local frame = U.G(name)
+    if frame then
+      local shown = rollDump.Try(frame, "IsShown")
+      if shown or i == 1 then
+        U.Print("--- " .. name .. " ---")
+        rollDump.Describe(frame, "frame")
+
+        local ok, children = pcall(function() return { frame:GetChildren() } end)
+        if ok and type(children) == "table" then
+          local c
+          for c = 1, table.getn(children) do
+            rollDump.Describe(children[c], "  child")
+            -- One level deeper: the bar could belong to a child, not the frame.
+            local okG, grand = pcall(function() return { children[c]:GetChildren() } end)
+            if okG and type(grand) == "table" then
+              local g
+              for g = 1, table.getn(grand) do
+                rollDump.Describe(grand[g], "    sub")
+              end
+            end
+            local okR, kidRegions = pcall(function() return { children[c]:GetRegions() } end)
+            if okR and type(kidRegions) == "table" then
+              local r
+              for r = 1, table.getn(kidRegions) do
+                rollDump.Describe(kidRegions[r], "    region")
+              end
+            end
+          end
+        end
+
+        local okR, regions = pcall(function() return { frame:GetRegions() } end)
+        if okR and type(regions) == "table" then
+          local r
+          for r = 1, table.getn(regions) do
+            rollDump.Describe(regions[r], "  region")
+          end
+        end
+      end
+    end
+  end
+  U.Print("roll: dump complete")
+end
+
+handlers["roll"] = function() ShowLootRollDump() end
 -- Live readout, printed straight to chat: an aura timer that does not appear
 -- has exactly three possible causes and modules/auras.lua's dump names the one
 -- responsible, per row and per index, without a reload or a probe run.

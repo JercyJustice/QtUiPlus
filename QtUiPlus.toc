@@ -2,7 +2,7 @@
 ## Title: |cffffffffQt|cff33c0ffUiPlus
 ## Notes: Unreal Azeroth interface. UnrealUI layout with the full QtUI feature set.
 ## Author: JercyJustice
-## Version: 0.7.56
+## Version: 0.7.57
 ## X-License: MIT
 ## X-Credits: Based on UnrealUI by Tom75VN (MIT); features ported from QtUI by JercyJustice
 ## SavedVariables: QtUiPlusDB, QtUiPlusDiagDB

@@ -57,8 +57,18 @@ local CARD_H = 44
 -- What is left for the name once the icon, the three buttons and the paddings
 -- have taken their share. Derived from the constants above rather than measured
 -- off the frame, so it cannot go negative on a build whose GetWidth surprises.
-local NAME_W = CARD_W - PAD - ICON - NAME_GAP
-                       - (BTN * 3 + BTN_GAP * 2) - NAME_GAP - PAD
+-- What is left for the name once the icon, the button row and the paddings have
+-- taken their share. Derived from the constants and the row that was actually
+-- built, so a frame that turns out to carry a different number of buttons still
+-- gets a name that stops short of them.
+local function NameWidth(buttonCount)
+  local count = tonumber(buttonCount) or 3
+  if count < 1 then count = 1 end
+  local row = BTN * count + BTN_GAP * (count - 1)
+  local width = CARD_W - PAD - ICON - NAME_GAP - row - NAME_GAP - PAD
+  if width < 40 then width = 40 end
+  return width
+end
 
 -- Gap between stacked rolls.
 local STACK_GAP = 6
@@ -131,57 +141,111 @@ local function StyleIcon(name, quality)
   return icon
 end
 
--- Right to left: Pass sits on the frame's right edge, so the row reads
--- Need / Greed / Pass left to right, the order retail uses.
-local function StyleButtons(name, frame)
-  local order = { "PassButton", "GreedButton", "NeedButton" }
-  local previous
+-- The roll buttons.
+--
+-- USER_CONFIRMED_INGAME: the coin and the red X took the styling and the dice
+-- did not -- it kept its stock size and spilled over the coin beside it. Two of
+-- three resolving means this client does not name all three the way FrameXML
+-- does, so the row is no longer built from names alone: every Button among the
+-- frame's own children that is not the item icon is a roll button.
+--
+-- The documented names are still tried first so a build that does match keeps
+-- that order, anything else found is appended, and the row is then sorted by
+-- the x the client had already given each button -- so it reads left to right
+-- in the client's own order whatever the buttons turn out to be called.
+local function CollectButtons(name, frame)
+  local list, seen = {}, {}
+  local icon = U.G(name .. "IconFrame")
+  local known = { "NeedButton", "GreedButton", "PassButton" }
   local i
-  for i = 1, table.getn(order) do
-    local button = U.G(name .. order[i])
-    if button then
-      pcall(button.SetWidth, button, BTN)
-      pcall(button.SetHeight, button, BTN)
-      -- The dice / coin / pass glyphs ARE this button's stock textures, so the
-      -- art is kept -- it is the only thing telling one roll button from
-      -- another. It does have to be pinned to the button, though:
-      -- USER_CONFIRMED_INGAME the stock art keeps its own larger size when the
-      -- button is resized, so the dice spilled across the coin beside it.
-      local faces = { "GetNormalTexture", "GetPushedTexture",
-                      "GetHighlightTexture", "GetDisabledTexture" }
-      local f
-      for f = 1, table.getn(faces) do
-        local getter = button[faces[f]]
-        if type(getter) == "function" then
-          local okFace, texture = pcall(getter, button)
-          if okFace and texture then
-            pcall(function()
-              texture:ClearAllPoints()
-              texture:SetAllPoints(button)
-            end)
+  for i = 1, table.getn(known) do
+    local button = U.G(name .. known[i])
+    if button and not seen[button] then
+      seen[button] = true
+      table.insert(list, button)
+    end
+  end
+
+  if frame.GetChildren then
+    local ok, children = pcall(function() return { frame:GetChildren() } end)
+    if ok and type(children) == "table" then
+      for i = 1, table.getn(children) do
+        local child = children[i]
+        if child and child ~= icon and not seen[child] and child.GetObjectType then
+          local typeOk, objectType = pcall(child.GetObjectType, child)
+          if typeOk and objectType == "Button" then
+            seen[child] = true
+            table.insert(list, child)
           end
         end
       end
-      U.CreateBackdrop(button, {
-        background = M.color.backgroundRaised,
-        border = M.color.border,
-      })
-      pcall(function()
-        button:ClearAllPoints()
-        if previous then
-          button:SetPoint("RIGHT", previous, "LEFT", -BTN_GAP, 0)
-        else
-          button:SetPoint("RIGHT", frame, "RIGHT", -PAD, 0)
-        end
-      end)
-      previous = button
     end
   end
-  -- The leftmost button that resolved; the name text stops short of it.
-  return previous
+
+  -- Never nil, so the comparison below cannot fault on a build where GetLeft
+  -- reports nothing; those keep the order they were collected in.
+  local order = {}
+  for i = 1, table.getn(list) do
+    local value
+    if list[i].GetLeft then
+      local okLeft, left = pcall(list[i].GetLeft, list[i])
+      if okLeft then value = tonumber(left) end
+    end
+    order[list[i]] = value or (i * 1000)
+  end
+  table.sort(list, function(a, b) return order[a] < order[b] end)
+
+  return list
 end
 
-local function StyleName(name, frame, icon, leftmostButton, quality)
+local function StyleButtons(name, frame)
+  local list = CollectButtons(name, frame)
+  local count = table.getn(list)
+  local previous
+  -- Placed right to left, so the row ends flush with the card's right edge and
+  -- reads in collected order left to right.
+  local i
+  for i = count, 1, -1 do
+    local button = list[i]
+    pcall(button.SetWidth, button, BTN)
+    pcall(button.SetHeight, button, BTN)
+    -- The dice / coin / pass glyphs ARE these buttons' stock textures, so the
+    -- art is kept -- it is the only thing telling one roll button from another.
+    -- It does have to be pinned to the button, though: the stock art keeps its
+    -- own larger size when the button is resized.
+    local faces = { "GetNormalTexture", "GetPushedTexture",
+                    "GetHighlightTexture", "GetDisabledTexture" }
+    local f
+    for f = 1, table.getn(faces) do
+      local getter = button[faces[f]]
+      if type(getter) == "function" then
+        local okFace, texture = pcall(getter, button)
+        if okFace and texture then
+          pcall(function()
+            texture:ClearAllPoints()
+            texture:SetAllPoints(button)
+          end)
+        end
+      end
+    end
+    U.CreateBackdrop(button, {
+      background = M.color.backgroundRaised,
+      border = M.color.border,
+    })
+    pcall(function()
+      button:ClearAllPoints()
+      if previous then
+        button:SetPoint("RIGHT", previous, "LEFT", -BTN_GAP, 0)
+      else
+        button:SetPoint("RIGHT", frame, "RIGHT", -PAD, 0)
+      end
+    end)
+    previous = button
+  end
+  return count
+end
+
+local function StyleName(name, frame, icon, buttonCount, quality)
   local label = U.G(name .. "Name")
   if not label then return end
 
@@ -195,7 +259,7 @@ local function StyleName(name, frame, icon, leftmostButton, quality)
     label:ClearAllPoints()
     label:SetPoint("LEFT", icon or frame, icon and "RIGHT" or "LEFT",
                    icon and NAME_GAP or PAD, 0)
-    label:SetWidth(NAME_W)
+    label:SetWidth(NameWidth(buttonCount))
     label:SetHeight(M.fontSize.normal + 4)
   end)
   pcall(label.SetJustifyH, label, "LEFT")
@@ -296,8 +360,8 @@ local function Skin(name, index)
 
   local quality, itemName = RollItem(frame)
   local icon = StyleIcon(name, quality)
-  local leftmost = StyleButtons(name, frame)
-  StyleName(name, frame, icon, leftmost, quality)
+  local buttonCount = StyleButtons(name, frame)
+  StyleName(name, frame, icon, buttonCount, quality)
   StyleTimer(name, frame)
   HideDuplicateName(frame, U.G(name .. "Name"), itemName)
 end
