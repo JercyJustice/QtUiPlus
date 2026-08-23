@@ -147,6 +147,21 @@ local function PreferredSide()
   return "left"
 end
 
+-- The paperdoll tooltip already is the equipped item. Showing ShoppingTooltip
+-- against that slot duplicates it (and for rings/trinkets/1H weapons pops a
+-- second window for the other slot). Skip when GameTooltip is owned by a
+-- Character* gear button.
+local function IsPaperDollOwner(tooltip)
+  if not tooltip or not tooltip.GetOwner then return false end
+  local ok, owner = pcall(tooltip.GetOwner, tooltip)
+  if not ok or not owner then return false end
+  if not owner.GetName then return false end
+  local nameOk, name = pcall(owner.GetName, owner)
+  if not nameOk or type(name) ~= "string" then return false end
+  if string.find(name, "Character", 1, true) then return true end
+  return false
+end
+
 local function OnTooltipShow()
   if not Enabled() then
     HideCompare()
@@ -155,6 +170,10 @@ local function OnTooltipShow()
 
   local tooltip = U.G("GameTooltip")
   if not tooltip or not tooltip.IsVisible or not tooltip:IsVisible() then return end
+  if IsPaperDollOwner(tooltip) then
+    HideCompare()
+    return
+  end
 
   local rows = BuildSlotRows()
   local lines = 0
