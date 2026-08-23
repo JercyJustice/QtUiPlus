@@ -1840,16 +1840,9 @@ RefreshOverview = function()
   elseif detailMode == "targets" then
     title = tag .. " targets"
   end
-  if not frame._placed then
-    LayoutCenterPanel(frame, width, height, title, "")
-    frame._placed = true
-    PlaceBox(frame.split, frame, 8 + ROSTER_W + 4, 8, 1, height - TITLE_H - 10)
-    PlaceBox(frame.compare, frame, 8, 6, ROSTER_W, 16)
-  else
-    if frame.title then frame.title:SetText(title) end
-    if frame.EnableMouse then frame:EnableMouse(true) end
-    if frame.Show then pcall(frame.Show, frame) end
-  end
+  LayoutCenterPanel(frame, width, height, title, "")
+  PlaceBox(frame.split, frame, 8 + ROSTER_W + 4, 8, 1, height - TITLE_H - 10)
+  PlaceBox(frame.compare, frame, 8, 6, ROSTER_W, 16)
   PlaceBox(frame.title, frame, 10, height - 16, ROSTER_W - 4, 12)
   if frame.title.SetJustifyH then pcall(frame.title.SetJustifyH, frame.title, "LEFT") end
   frame.title:SetText(title)
@@ -2188,6 +2181,20 @@ local function ShowFightPage()
     PlaceBox(frame.prev, frame, 10, 8, 28, 18)
     PlaceBox(frame.next, frame, width - 38, 8, 28, 18)
     PlaceBox(frame.page, frame, 46, 8, width - 92, 18)
+    if frame.prev.text then
+      PlaceBox(frame.prev.text, frame.prev, 0, 0, 28, 18)
+      if frame.prev.text.SetJustifyH then
+        pcall(frame.prev.text.SetJustifyH, frame.prev.text, "CENTER")
+      end
+      if frame.prev.text.Show then pcall(frame.prev.text.Show, frame.prev.text) end
+    end
+    if frame.next.text then
+      PlaceBox(frame.next.text, frame.next, 0, 0, 28, 18)
+      if frame.next.text.SetJustifyH then
+        pcall(frame.next.text.SetJustifyH, frame.next.text, "CENTER")
+      end
+      if frame.next.text.Show then pcall(frame.next.text.Show, frame.next.text) end
+    end
     if frame.page.SetJustifyH then pcall(frame.page.SetJustifyH, frame.page, "CENTER") end
     frame.page:SetText(tostring(fightPage) .. " / " .. tostring(pages))
     if frame.page.Show then pcall(frame.page.Show, frame.page) end
@@ -2968,19 +2975,32 @@ local function TitleInset(showFight)
   return HEADER_PAD + (BTN + 2) * n
 end
 
--- Emberveil ignores TOP offsets and FontString JustifyV. Place chrome from
--- the frame's BOTTOMLEFT with a second corner, same as every other QtP box.
+-- Emberveil FontStrings: a single LEFT/CENTER point keeps the template size
+-- and draws nothing. Pin a BOTTOMLEFT/TOPRIGHT pixel box from the parent
+-- BOTTOMLEFT, and do not call SetWidth (that zeros the string).
+-- Frames/StatusBars: SetWidth/SetHeight then one BOTTOMLEFT. Two points plus
+-- SetWidth stretches the widget to fill the parent -- that is why the fights
+-- list and the player details window went fullscreen with no labels.
 function PlaceBox(widget, parent, left, bottom, width, height)
   if not widget then return end
   widget:ClearAllPoints()
-  widget:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", left, bottom)
-  widget:SetPoint("TOPRIGHT", parent, "BOTTOMLEFT", left + width, bottom + height)
+  local objectType
+  if widget.GetObjectType then
+    local ok, value = pcall(widget.GetObjectType, widget)
+    if ok then objectType = value end
+  end
+  if objectType == "FontString" then
+    widget:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", left, bottom)
+    widget:SetPoint("TOPRIGHT", parent, "BOTTOMLEFT", left + width, bottom + height)
+    return
+  end
   if widget.SetWidth then
     widget:SetWidth(width + 1)
     if widget.SetHeight then widget:SetHeight(height + 1) end
     widget:SetWidth(width)
     if widget.SetHeight then widget:SetHeight(height) end
   end
+  widget:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", left, bottom)
 end
 
 local function TooltipOn(frame, lines)
