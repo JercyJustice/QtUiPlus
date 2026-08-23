@@ -984,16 +984,20 @@ end
 -- here re-centres every button label in every QtUiPlus interface at once.
 U.BUTTON_LABEL_OFFSET_Y = -2
 
--- Select controls (U.CreateSelect) and the native dropdown skin
--- (core/dropdown.lua) do not use that offset: their label is pinned to the
--- control's left edge rather than centred, and this client leaves the glyphs
--- against an edge of a region whose height differs from the box instead of
--- centring them in it. Both therefore clamp the label region to the control
--- height and set SetJustifyV("CENTER") explicitly; what is left at that centre
--- is the one pixel USER_CONFIRMED_INGAME on the native control, which is this
--- value. Without the clamp the character-sheet stat dropdowns sat a few pixels
--- low, which is the bug this constant and its clamp were introduced for.
-U.SELECT_LABEL_OFFSET_Y = -1
+-- Select controls (U.CreateSelect) do not use that offset: their label is
+-- pinned to the control's left edge rather than centred, and this client leaves
+-- the glyphs against an edge of a region whose height differs from the box
+-- instead of centring them in it. The widget therefore clamps the label region
+-- to the control height and sets SetJustifyV("CENTER") explicitly; this value
+-- is what is left to correct at that centre.
+--
+-- USER_CONFIRMED_INGAME on the character sheet's stat dropdowns: two pixels
+-- above the clamped centre is where the label reads level with its box. The
+-- native dropdown skin keeps its own CONTROL_TEXT_Y (core/dropdown.lua) rather
+-- than sharing this one -- it was confirmed separately, on a control twice this
+-- height whose FontString comes from the stock template, and the two residuals
+-- did not turn out to be the same number.
+U.SELECT_LABEL_OFFSET_Y = 1
 
 -- Nine-point placement used by hotkeys and unit-frame labels. Single-edge
 -- anchors only: fonts.stretched_justification_ignored means a FontString
