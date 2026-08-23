@@ -248,33 +248,374 @@ local function StyleResistances()
   RaiseResistancesAboveModel()
 end
 
--- FontString names below (CharacterStrengthLabel/Value, MeleeAttackPower*,
--- etc.) are UNVERIFIED against this client's compact evidence -- no
--- query_compat.py or query_QtUiPlus.py record covers them, and UnrealPfUI's own
--- Character skin never touches stat text either. Every call is G()+pcall
--- guarded so a wrong name simply leaves that line un-recoloured (native
--- black/white text) rather than breaking the sheet; confirm in-game and fold
--- the real names into knowledge.json once checked.
-local function StyleAttributes()
-  local labels = {
-    "CharacterStrength", "CharacterAgility", "CharacterStamina",
-    "CharacterIntellect", "CharacterSpirit", "CharacterArmor",
-  }
-  local i
-  for i = 1, table.getn(labels) do
-    SetTextFont(G(labels[i] .. "Label"), M.fontSize.normal, DIM)
-    SetTextFont(G(labels[i] .. "Value"), M.fontSize.normal, WHITE)
+-- Native paperdoll only prints base stats plus melee/ranged. pfUI's two
+-- dropdowns (Base / Melee / Melee vs Boss / Spell / Schools / Defenses) come
+-- from BetterCharacterStats, which pfUI only skins (thirdparty-vanilla.lua).
+-- QtUiPlus owns the same categories here. Combat chances:
+-- https://emberveil.org/wiki/lua/globals/Character#getdodgechance
+-- (GetParryChance / GetBlockChance on the same page.) Weapon skill, AP,
+-- damage, armor, defense: wiki Unit UnitAttackBothHands / UnitAttackPower /
+-- UnitDamage / UnitArmor / UnitDefense / UnitStat.
+local GREEN = { 0.30, 1.00, 0.50 }
+local STAT_COL_W = 112
+local STAT_ROW_H = 13
+local STAT_DROP_H = 18
+local STAT_ROWS = 6
+local STAT_CATS = {
+  { key = "base",          label = "Base Stats" },
+  { key = "melee",         label = "Melee" },
+  { key = "meleeBoss",     label = "Melee vs Boss" },
+  { key = "spell",         label = "Spell" },
+  { key = "schools",       label = "Schools" },
+  { key = "defenses",      label = "Defenses" },
+  { key = "defensesBoss",  label = "Defenses vs Boss" },
+}
+
+local statOverlay
+local statLeft
+local statRight
+local statLeftRows
+local statRightRows
+
+local function Api(name, ...)
+  local fn = U.G(name)
+  if type(fn) ~= "function" then return nil end
+  local ok, a, b, c, d, e, f, g = pcall(fn, ...)
+  if not ok then return nil end
+  return a, b, c, d, e, f, g
+end
+
+local function Num(value)
+  return tonumber(value) or 0
+end
+
+local function FmtInt(value)
+  if value == nil then return "—" end
+  return tostring(math.floor(Num(value) + 0.5))
+end
+
+local function FmtPct(value)
+  if value == nil then return "—" end
+  return string.format("%.2f%%", Num(value))
+end
+
+local function FmtSpeed(value)
+  if not value or Num(value) <= 0 then return "—" end
+  return string.format("%.2f", Num(value))
+end
+
+local function PlayerLevel()
+  local level = Num(Api("UnitLevel", "player"))
+  if level < 1 then level = 1 end
+  return level
+end
+
+local function EqualSkill()
+  return PlayerLevel() * 5
+end
+
+local function BossSkill()
+  local level = PlayerLevel() + 3
+  if level > 63 then level = 63 end
+  return level * 5
+end
+
+local function WeaponSkill()
+  local mh, bonus = Api("UnitAttackBothHands", "player")
+  return Num(mh) + Num(bonus)
+end
+
+local function DefenseSkill()
+  local skill, bonus = Api("UnitDefense", "player")
+  return Num(skill) + Num(bonus)
+end
+
+local function ArmorValue()
+  local _, effective = Api("UnitArmor", "player")
+  return Num(effective)
+end
+
+local function StatValue(index)
+  local _, effective, pos = Api("UnitStat", "player", index)
+  return Num(effective), Num(pos)
+end
+
+local function MeleeCrit()
+  local chance = Api("GetCritChance")
+  if chance ~= nil then return Num(chance) end
+  local _, agi = StatValue(2)
+  local _, token = Api("UnitClass", "player")
+  local per = 20
+  if token == "ROGUE" then per = 29
+  elseif token == "HUNTER" then per = 53 end
+  return 5 + agi / per
+end
+
+local function HitChance(weaponSkill, enemySkill, vsBoss)
+  local miss = vsBoss and 8 or 5
+  miss = miss - (Num(weaponSkill) - Num(enemySkill)) * 0.04
+  local hitMod = Api("GetHitModifier")
+  miss = miss - Num(hitMod)
+  if miss < 0 then miss = 0 end
+  if miss > 100 then miss = 100 end
+  return 100 - miss
+end
+
+local function ShiftBySkill(base, ours, theirs)
+  local value = Num(base) + (Num(ours) - Num(theirs)) * 0.04
+  if value < 0 then value = 0 end
+  return value
+end
+
+local function SpellDamage(school)
+  return Api("GetSpellBonusDamage", school)
+end
+
+local function CollectCategory(key)
+  local rows = {}
+  local function Add(label, value, glow)
+    table.insert(rows, { label = label, value = value, glow = glow })
   end
 
-  local attackLabels = {
+  if key == "base" then
+    local names = { "Strength", "Agility", "Stamina", "Intellect", "Spirit" }
+    local i
+    for i = 1, 5 do
+      local value, pos = StatValue(i)
+      Add(names[i] .. ":", FmtInt(value), pos > 0)
+    end
+    Add("Armor:", FmtInt(ArmorValue()), false)
+
+  elseif key == "melee" or key == "meleeBoss" then
+    local vsBoss = key == "meleeBoss"
+    local skill = WeaponSkill()
+    local enemy = vsBoss and BossSkill() or EqualSkill()
+    local minD, maxD = Api("UnitDamage", "player")
+    local speed = Api("UnitAttackSpeed", "player")
+    local base, pos, neg = Api("UnitAttackPower", "player")
+    local power = Num(base) + Num(pos) + Num(neg)
+    local crit = MeleeCrit()
+    if vsBoss then crit = ShiftBySkill(crit, skill, enemy) end
+    Add("Wpn Skill:", FmtInt(skill), false)
+    if minD and maxD then
+      Add("Damage:", FmtInt(minD) .. "-" .. FmtInt(maxD), Num(pos) > 0)
+    else
+      Add("Damage:", "—", false)
+    end
+    Add("Speed:", FmtSpeed(speed), false)
+    Add("Power:", FmtInt(power), Num(pos) > 0)
+    Add("Hit:", FmtPct(HitChance(skill, enemy, vsBoss)), false)
+    Add("Crit Chance:", FmtPct(crit), false)
+
+  elseif key == "spell" then
+    local heal = Api("GetSpellBonusHealing")
+    local dmg = SpellDamage(2) or SpellDamage(1)
+    local crit = Api("GetSpellCritChance")
+    if type(crit) ~= "number" then crit = Api("GetSpellCritChance", 2) end
+    local hit = Api("GetSpellHitModifier")
+    Add("Healing:", FmtInt(heal), Num(heal) > 0)
+    Add("Damage:", FmtInt(dmg), Num(dmg) > 0)
+    Add("Spell Crit:", FmtPct(crit), false)
+    Add("Spell Hit:", hit ~= nil and FmtPct(hit) or "—", false)
+    Add("Holy:", FmtInt(SpellDamage(2)), false)
+    Add("Shadow:", FmtInt(SpellDamage(6)), false)
+
+  elseif key == "schools" then
+    Add("Holy:", FmtInt(SpellDamage(2)), false)
+    Add("Fire:", FmtInt(SpellDamage(3)), false)
+    Add("Nature:", FmtInt(SpellDamage(4)), false)
+    Add("Frost:", FmtInt(SpellDamage(5)), false)
+    Add("Shadow:", FmtInt(SpellDamage(6)), false)
+    Add("Arcane:", FmtInt(SpellDamage(7)), false)
+
+  elseif key == "defenses" or key == "defensesBoss" then
+    local vsBoss = key == "defensesBoss"
+    local defense = DefenseSkill()
+    local enemy = vsBoss and BossSkill() or EqualSkill()
+    local dodge = Api("GetDodgeChance")
+    local parry = Api("GetParryChance")
+    local block = Api("GetBlockChance")
+    if vsBoss then
+      dodge = ShiftBySkill(dodge, defense, enemy)
+      parry = ShiftBySkill(parry, defense, enemy)
+      block = ShiftBySkill(block, defense, enemy)
+    end
+    local total = Num(dodge) + Num(parry) + Num(block)
+    Add("Armor:", FmtInt(ArmorValue()), false)
+    Add("Defense:", FmtInt(defense), false)
+    Add("Dodge:", FmtPct(dodge), false)
+    Add("Parry:", FmtPct(parry), false)
+    Add("Block:", FmtPct(block), false)
+    Add("Total:", FmtPct(total), false)
+  end
+
+  return rows
+end
+
+local function HideNativeAttributeText()
+  local names = {
+    "CharacterStrength", "CharacterAgility", "CharacterStamina",
+    "CharacterIntellect", "CharacterSpirit", "CharacterArmor",
     "MeleeAttackPower", "MeleeDamage", "MeleeAttackBonus",
     "RangedAttackPower", "RangedDamage", "RangedAttackBonus",
-    "Defense", "Armor", "ResistanceFrame",
   }
-  for i = 1, table.getn(attackLabels) do
-    SetTextFont(G(attackLabels[i] .. "Label"), M.fontSize.small, DIM)
-    SetTextFont(G(attackLabels[i] .. "Value"), M.fontSize.small, WHITE)
+  local i
+  for i = 1, table.getn(names) do
+    local label = G(names[i] .. "Label")
+    local value = G(names[i] .. "Stat") or G(names[i] .. "Value") or G(names[i])
+    if label then
+      pcall(label.Hide, label)
+      pcall(label.SetAlpha, label, 0)
+    end
+    if value and value ~= label then
+      pcall(value.Hide, value)
+      pcall(value.SetAlpha, value, 0)
+    end
   end
+  local host = G("CharacterAttributesFrame")
+  if host and host.GetRegions then
+    pcall(function()
+      local regions = { host:GetRegions() }
+      local r
+      for r = 1, table.getn(regions) do
+        local region = regions[r]
+        local ok, objectType = pcall(region.GetObjectType, region)
+        if ok and objectType == "FontString" then
+          pcall(region.Hide, region)
+          pcall(region.SetAlpha, region, 0)
+        end
+      end
+    end)
+  end
+end
+
+local function PlaceStatText(fs, parent, left, bottom, width, height, justify)
+  if not fs then return end
+  pcall(fs.ClearAllPoints, fs)
+  pcall(fs.SetPoint, fs, "BOTTOMLEFT", parent, "BOTTOMLEFT", left, bottom)
+  pcall(fs.SetPoint, fs, "TOPRIGHT", parent, "BOTTOMLEFT", left + width, bottom + height)
+  if fs.SetJustifyH then pcall(fs.SetJustifyH, fs, justify or "LEFT") end
+end
+
+local function PaintColumn(rows, data)
+  local i
+  for i = 1, STAT_ROWS do
+    local spec = data[i]
+    local slot = rows[i]
+    if spec then
+      pcall(slot.label.SetText, slot.label, spec.label)
+      pcall(slot.value.SetText, slot.value, spec.value)
+      local color = spec.glow and GREEN or WHITE
+      pcall(slot.value.SetTextColor, slot.value, color[1], color[2], color[3])
+      pcall(slot.label.Show, slot.label)
+      pcall(slot.value.Show, slot.value)
+    else
+      pcall(slot.label.SetText, slot.label, "")
+      pcall(slot.value.SetText, slot.value, "")
+    end
+  end
+end
+
+local function RefreshStatPanel()
+  if not statOverlay then return end
+  local paper = G("PaperDollFrame")
+  if paper and paper.IsShown then
+    local ok, shown = pcall(paper.IsShown, paper)
+    if ok and not shown then return end
+  end
+  HideNativeAttributeText()
+  local cfg = U.ModuleConfig("character", { leftCat = "defenses", rightCat = "melee" })
+  if statLeft then
+    statLeft.SetValue(cfg.leftCat or "defenses")
+    PaintColumn(statLeftRows, CollectCategory(cfg.leftCat or "defenses"))
+  end
+  if statRight then
+    statRight.SetValue(cfg.rightCat or "melee")
+    PaintColumn(statRightRows, CollectCategory(cfg.rightCat or "melee"))
+  end
+end
+
+local function MakeStatRows(parent, column)
+  local rows = {}
+  local height = STAT_DROP_H + 4 + STAT_ROWS * STAT_ROW_H
+  local x = (column - 1) * (STAT_COL_W + 8)
+  local i
+  for i = 1, STAT_ROWS do
+    local bottom = height - STAT_DROP_H - 4 - i * STAT_ROW_H
+    local label = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    local value = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    PlaceStatText(label, parent, x, bottom, 64, STAT_ROW_H, "LEFT")
+    PlaceStatText(value, parent, x + 64, bottom, STAT_COL_W - 64, STAT_ROW_H, "RIGHT")
+    pcall(label.SetTextColor, label, DIM[1], DIM[2], DIM[3])
+    pcall(value.SetTextColor, value, WHITE[1], WHITE[2], WHITE[3])
+    rows[i] = { label = label, value = value }
+  end
+  return rows
+end
+
+local function BuildStatPanel()
+  if statOverlay then return end
+  local host = G("CharacterAttributesFrame") or G("PaperDollFrame")
+  if not host then return end
+
+  local width = STAT_COL_W * 2 + 8
+  local height = STAT_DROP_H + 4 + STAT_ROWS * STAT_ROW_H
+  statOverlay = CreateFrame("Frame", "QtUiPlusCharStats", host)
+  statOverlay:SetWidth(width)
+  statOverlay:SetHeight(height)
+  statOverlay:SetPoint("TOPLEFT", host, "TOPLEFT", 0, 2)
+  pcall(statOverlay.EnableMouse, statOverlay, false)
+  local ok, level = pcall(host.GetFrameLevel, host)
+  if ok and tonumber(level) then
+    pcall(statOverlay.SetFrameLevel, statOverlay, tonumber(level) + 8)
+  end
+
+  local cfg = U.ModuleConfig("character", { leftCat = "defenses", rightCat = "melee" })
+  statLeft = U.CreateSelect(statOverlay, {
+    name = "QtUiPlusCharStatLeft",
+    width = STAT_COL_W,
+    height = STAT_DROP_H,
+    values = STAT_CATS,
+    value = cfg.leftCat or "defenses",
+    onChange = function(key)
+      U.ModuleConfig("character", { leftCat = "defenses" }).leftCat = key
+      RefreshStatPanel()
+    end,
+  })
+  statLeft.SetPoint("TOPLEFT", statOverlay, "TOPLEFT", 0, 0)
+  if statLeft.caption then pcall(statLeft.caption.Hide, statLeft.caption) end
+
+  statRight = U.CreateSelect(statOverlay, {
+    name = "QtUiPlusCharStatRight",
+    width = STAT_COL_W,
+    height = STAT_DROP_H,
+    values = STAT_CATS,
+    value = cfg.rightCat or "melee",
+    onChange = function(key)
+      U.ModuleConfig("character", { rightCat = "melee" }).rightCat = key
+      RefreshStatPanel()
+    end,
+  })
+  statRight.SetPoint("TOPLEFT", statOverlay, "TOPLEFT", STAT_COL_W + 8, 0)
+  if statRight.caption then pcall(statRight.caption.Hide, statRight.caption) end
+
+  statLeftRows = MakeStatRows(statOverlay, 1)
+  statRightRows = MakeStatRows(statOverlay, 2)
+
+  U.RegisterEvent("UNIT_AURA", function(_, unit)
+    if unit == "player" then RefreshStatPanel() end
+  end)
+  U.RegisterEvent("UNIT_INVENTORY_CHANGED", function(_, unit)
+    if not unit or unit == "player" then RefreshStatPanel() end
+  end)
+  U.RegisterEvent("PLAYER_ENTERING_WORLD", RefreshStatPanel)
+  U.RegisterEvent("PLAYER_LEVEL_UP", RefreshStatPanel)
+end
+
+local function StyleAttributes()
+  HideNativeAttributeText()
+  BuildStatPanel()
+  RefreshStatPanel()
 end
 
 -- Click-drag model rotation, replacing the native rotate-left/right buttons
@@ -1016,7 +1357,10 @@ local function BuildFrame()
   -- equipped/unequipped while the sheet is open; re-running StyleSlots keeps
   -- QtUiPlus's border/icon framing in sync with it. StyleStockButton no-ops
   -- past its first pass per button, so this is safe to call repeatedly.
-  U.PostHookGlobal("PaperDollItemSlotButton_Update", StyleSlots)
+  U.PostHookGlobal("PaperDollItemSlotButton_Update", function()
+    StyleSlots()
+    RefreshStatPanel()
+  end)
 
   local shown = false
   if frame.IsShown then
