@@ -185,6 +185,31 @@ function QtP.GetMobHealth(unit)
   return percent, nil, "pct"
 end
 
+local function Short(value)
+  value = tonumber(value) or 0
+  local absolute = math.abs(value)
+  if absolute > 1000000 then
+    return string.format("%.1fm", value / 1000000)
+  end
+  if absolute > 10000 then
+    return string.format("%.1fk", value / 1000)
+  end
+  return tostring(math.floor(value + 0.5))
+end
+
+-- One-line readout for unit frames, nameplates and the tooltip bar.
+-- Returns nil when the lookup does not apply (players, real hit-point units).
+function QtP.FormatMobHealth(unit)
+  local current, maximum, mode = QtP.GetMobHealth(unit)
+  if mode == "hp" then
+    return Short(current) .. " / " .. Short(maximum), mode
+  end
+  if mode == "pct" then
+    return tostring(math.floor((current or 0) + 0.5)) .. "%", mode
+  end
+  return nil
+end
+
 function M:OnEnable()
   -- Data-only module: nothing to build. Registered so it appears in the module
   -- list and can be disabled like any other feature.

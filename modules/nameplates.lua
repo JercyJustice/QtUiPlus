@@ -633,12 +633,18 @@ local function RefreshPlate(overlay)
     overlay.health:SetValue(value)
 
     if overlay.healthText then
+      local text = ""
       if cfg.showHealthText and maximum > minimum then
-        local perc = (value - minimum) / (maximum - minimum) * 100
-        overlay.healthText:SetText(string.format("%.1f%%", perc))
-      else
-        overlay.healthText:SetText("")
+        if overlay.isTarget and type(QtP) == "table" and
+           type(QtP.FormatMobHealth) == "function" then
+          text = QtP.FormatMobHealth("target") or ""
+        end
+        if text == "" then
+          local perc = (value - minimum) / (maximum - minimum) * 100
+          text = string.format("%.1f%%", perc)
+        end
       end
+      overlay.healthText:SetText(text)
     end
   else
     -- No health data at all: a name/level row on its own beats an empty bar.

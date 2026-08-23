@@ -602,8 +602,17 @@ local function ReadHealth(frame)
   -- and confirmed in game on the target frame, where "84 - 84%" printed the
   -- same number twice. When health *is* the percentage, the value half of the
   -- dynamic text carries no extra information, so only the percentage is
-  -- drawn.
+  -- drawn -- unless GetMobHealth resolves a real pool from the creature table
+  -- (QtUI's enemy health readout).
   data.healthIsPercent = data.healthMax == 100 and not REAL_HEALTH_UNITS[unit]
+  data.mobHealth, data.mobHealthMax, data.mobHealthMode = nil, nil, nil
+  if data.healthIsPercent and type(QtP) == "table" and
+     type(QtP.GetMobHealth) == "function" then
+    local current, maximum, mode = QtP.GetMobHealth(unit)
+    data.mobHealth = current
+    data.mobHealthMax = maximum
+    data.mobHealthMode = mode
+  end
 end
 
 local function ReadPower(frame)
@@ -715,6 +724,10 @@ local function StatusText(frame, token)
     local prefix = Hex(hr, hg, hb)
 
     if data.isDead then return prefix .. (U.G("DEAD") or "Dead") end
+    if data.mobHealthMode == "hp" then
+      return prefix .. Abbreviate(data.mobHealth) .. " / " ..
+             Abbreviate(data.mobHealthMax)
+    end
     if data.health ~= data.healthMax and data.healthMax > 0 then
       if data.healthIsPercent then
         return prefix .. math.ceil(data.healthPercent * 100) .. "%"
