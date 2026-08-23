@@ -112,6 +112,9 @@ end
 -- to clear the backdrop out from under a native frame.
 -- ---------------------------------------------------------------------------
 local healthLabel
+-- Lua 5.1: StyleFrame calls DropMouse. `local function DropMouse` later
+-- would be a new local; StyleFrame would still see a nil global.
+local DropMouse
 
 local function ClearNativeEdge(frame)
   if not frame or not frame.SetBackdropBorderColor then return end
@@ -369,7 +372,6 @@ end
 -- ---------------------------------------------------------------------------
 
 local hookFrame
-local DropMouse
 
 local function Restyle()
   RefreshTooltip(true)
