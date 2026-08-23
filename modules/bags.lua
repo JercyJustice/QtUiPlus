@@ -40,9 +40,52 @@ local BAG_SLOT_COUNT = 4            -- the four swappable equipped bag slots
 
 -- Metrics are the shared container tokens (core/media.lua M.slot) so the bag
 -- and bank windows cannot drift apart; only the row length is per-window.
+-- Shipped geometry, kept as the settings defaults. COLUMNS and SLOT_SIZE are
+-- read through Columns()/SlotSize() below so a settings change takes effect on
+-- the next layout pass rather than needing a reload.
 local COLUMNS       = 10
 local SLOT_SIZE     = M.slot.size
 local SLOT_GAP      = M.slot.gap
+
+local LIMITS = {
+  columns  = { min = 6,  max = 16, step = 1 },
+  slotSize = { min = 24, max = 52, step = 1 },
+}
+
+local DEFAULTS = {
+  columns   = COLUMNS,
+  slotSize  = SLOT_SIZE,
+  showKeys  = true,
+  hideEmpty = false,
+}
+
+local bagCfg
+
+local function Clamp(name, value)
+  local limit = LIMITS[name]
+  value = tonumber(value)
+  if not limit then return value end
+  if not value then return limit.min end
+  value = U.Round(value)
+  if value < limit.min then value = limit.min end
+  if value > limit.max then value = limit.max end
+  return value
+end
+
+local function Columns()
+  if not bagCfg then return COLUMNS end
+  return Clamp("columns", bagCfg.columns)
+end
+
+local function SlotSize()
+  if not bagCfg then return SLOT_SIZE end
+  return Clamp("slotSize", bagCfg.slotSize)
+end
+
+local function ShowKeyring()
+  if not bagCfg then return true end
+  return bagCfg.showKeys and true or false
+end
 local PADDING       = M.slot.padding
 local HEADER_HEIGHT = M.slot.header
 local ICON_SIZE     = M.slot.icon
@@ -333,7 +376,30 @@ local function UpdateCooldown(bag, slot)
 end
 
 local function UpdateSlotAppearance(bag, slot)
-  U.UpdateItemSlot(slots[bag] and slots[bag][slot], bag, slot)
+  local button = slots[bag] and slots[bag][slot]
+  U.UpdateItemSlot(button, bag, slot)
+
+  -- "Dim empty slots": fade the whole button rather than hiding it, so the
+  -- grid keeps its shape and an empty slot is still a drop target. Only
+  -- applied to slots with no item, and always reset to full alpha otherwise --
+  -- a slot that gets filled must not stay faded.
+  if not button or not bagCfg or not button.SetAlpha then return end
+  if not bagCfg.hideEmpty then
+    pcall(button.SetAlpha, button, 1)
+    return
+  end
+
+  local link = U.G("GetContainerItemLink")
+  local hasItem = false
+  if type(link) == "function" then
+    local ok, value = pcall(link, bag, slot)
+    hasItem = ok and value ~= nil
+  end
+  if hasItem then
+    pcall(button.SetAlpha, button, 1)
+  else
+    pcall(button.SetAlpha, button, 0.25)
+  end
 end
 
 local function RefreshBag(bag)
@@ -368,6 +434,12 @@ local function LayoutKeyring()
   if not frame or not frame.keyring then return end
 
   local tray = frame.keyring
+  -- Turned off: hide the tray outright rather than laying out zero buttons,
+  -- so the panel does not linger as an empty strip above the bag.
+  if not ShowKeyring() then
+    tray:Hide()
+    return
+  end
   local n = KeyringSize()
   local shown = 0
   local slot
@@ -464,15 +536,16 @@ local function LayoutSlots()
       local button = EnsureSlot(bag, slot, grid)
       if button then
         button:ClearAllPoints()
+        local slotSize = SlotSize()
         button:SetPoint("TOPLEFT", grid, "TOPLEFT",
-                        x * (SLOT_SIZE + SLOT_GAP),
-                        -(y * (SLOT_SIZE + SLOT_GAP)))
-        button:SetWidth(SLOT_SIZE)
-        button:SetHeight(SLOT_SIZE)
+                        x * (slotSize + SLOT_GAP),
+                        -(y * (slotSize + SLOT_GAP)))
+        button:SetWidth(slotSize)
+        button:SetHeight(slotSize)
         UpdateSlotAppearance(bag, slot)
         button:Show()
 
-        if x >= COLUMNS - 1 then
+        if x >= Columns() - 1 then
           x, y = 0, y + 1
         else
           x = x + 1
@@ -495,8 +568,9 @@ local function LayoutSlots()
 
   -- The anchor owns the rect; the visible frame is stretched over it, so the
   -- mover handle keeps the same bounds whether or not the bag is open.
-  anchor:SetWidth(COLUMNS * (SLOT_SIZE + SLOT_GAP) - SLOT_GAP + PADDING * 2)
-  anchor:SetHeight(HEADER_HEIGHT + y * (SLOT_SIZE + SLOT_GAP) - SLOT_GAP
+  local slotSize = SlotSize()
+  anchor:SetWidth(Columns() * (slotSize + SLOT_GAP) - SLOT_GAP + PADDING * 2)
+  anchor:SetHeight(HEADER_HEIGHT + y * (slotSize + SLOT_GAP) - SLOT_GAP
                    + PADDING)
 end
 
@@ -718,8 +792,110 @@ local function Build()
   })
 end
 
+-- ---------------------------------------------------------------------------
+-- Settings
+-- ---------------------------------------------------------------------------
+function U.BagLimits(name)
+  local limit = LIMITS[name]
+  if not limit then return nil end
+  return limit.min, limit.max, limit.step
+end
+
+function U.GetBagSetting(name)
+  if not bagCfg then return nil end
+  if name == "showKeys" or name == "hideEmpty" then
+    return bagCfg[name] and true or false
+  end
+  return Clamp(name, bagCfg[name])
+end
+
+function U.SetBagSetting(name, value)
+  if not bagCfg then return nil end
+  if name == "showKeys" or name == "hideEmpty" then
+    bagCfg[name] = value and true or false
+  else
+    if not LIMITS[name] then return nil end
+    bagCfg[name] = Clamp(name, value)
+  end
+  -- The layout runs on the 0.2s dirty sweep rather than inline: rebuilding the
+  -- grid from inside a slider drag would relayout on every pixel of movement.
+  layoutDirty = true
+  keyringDirty = true
+  MarkAllBagsDirty()
+  return U.GetBagSetting(name)
+end
+
+local BAG_SLIDERS = {
+  { key = "columns",  text = "Columns" },
+  { key = "slotSize", text = "Slot Size" },
+}
+
+local function BuildSettingsPage(parent)
+  local widgets, controls = {}, {}
+
+  local header = U.CreateSectionHeader(parent, {
+    text = "Bags", width = 484, y = -4,
+  })
+  table.insert(widgets, header)
+
+  local keys = U.CreateCheckbox(parent, {
+    name = "QtUiPlusBagsKeyring",
+    text = "Show keyring",
+    value = U.GetBagSetting("showKeys"),
+    onChange = function(value) U.SetBagSetting("showKeys", value) end,
+  })
+  keys.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -34)
+  table.insert(widgets, keys)
+
+  local hideEmpty = U.CreateCheckbox(parent, {
+    name = "QtUiPlusBagsHideEmpty",
+    text = "Dim empty slots",
+    value = U.GetBagSetting("hideEmpty"),
+    onChange = function(value) U.SetBagSetting("hideEmpty", value) end,
+  })
+  hideEmpty.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -58)
+  table.insert(widgets, hideEmpty)
+
+  local i
+  for i = 1, table.getn(BAG_SLIDERS) do
+    local spec = BAG_SLIDERS[i]
+    local minimum, maximum, step = U.BagLimits(spec.key)
+    local slider = U.CreateSlider(parent, {
+      name = "QtUiPlusBags" .. spec.key,
+      text = spec.text,
+      width = 200,
+      min = minimum, max = maximum, step = step,
+      value = U.GetBagSetting(spec.key),
+      onChange = function(value) U.SetBagSetting(spec.key, value) end,
+    })
+    slider.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -102 - (i - 1) * 44)
+    controls[spec.key] = slider
+    table.insert(widgets, slider)
+  end
+
+  local function Refresh()
+    keys.SetValue(U.GetBagSetting("showKeys"))
+    hideEmpty.SetValue(U.GetBagSetting("hideEmpty"))
+    local j
+    for j = 1, table.getn(BAG_SLIDERS) do
+      local key = BAG_SLIDERS[j].key
+      if controls[key] then controls[key].SetValue(U.GetBagSetting(key)) end
+    end
+  end
+
+  return widgets, Refresh
+end
+
+function BG:OnInit()
+  bagCfg = U.ModuleConfig("bags", DEFAULTS)
+  if type(U.RegisterSettingsTab) == "function" then
+    U.RegisterSettingsTab("bags", "Bags", BuildSettingsPage)
+  end
+end
+
 function BG:OnEnable()
   if frame then return end
+  if not bagCfg then bagCfg = U.ModuleConfig("bags", DEFAULTS) end
 
   InstallToggleOverrides()
   Build()

@@ -161,6 +161,110 @@ local function BuildPage(parent)
   return widgets, Refresh
 end
 
+-- ---------------------------------------------------------------------------
+-- Damage meter page
+--
+-- The meter reads these straight off the QtUI layout table on its next layout
+-- pass, so a change only needs QtP:ApplyDamageMeterLayout() to be visible --
+-- there is no separate state to keep in step.
+-- ---------------------------------------------------------------------------
+local METER_LIMITS = {
+  meterWidth      = { min = 140, max = 400, step = 5 },
+  meterBars       = { min = 3,   max = 16,  step = 1 },
+  meterBarHeight  = { min = 12,  max = 24,  step = 1 },
+  meterBarSpacing = { min = 0,   max = 8,   step = 1 },
+}
+
+local METER_SLIDERS = {
+  { key = "meterWidth",      text = "Window Width" },
+  { key = "meterBars",       text = "Visible Bars" },
+  { key = "meterBarHeight",  text = "Bar Height" },
+  { key = "meterBarSpacing", text = "Bar Spacing" },
+}
+
+local function ApplyMeter()
+  if type(QtP.ApplyDamageMeterLayout) == "function" then
+    QtP:ApplyDamageMeterLayout()
+  end
+end
+
+local function SetMeter(key, value)
+  local layout = QtP:GetLayout()
+  local limit = METER_LIMITS[key]
+  if limit then
+    value = U.Round(tonumber(value) or limit.min)
+    if value < limit.min then value = limit.min end
+    if value > limit.max then value = limit.max end
+  end
+  layout[key] = value
+  ApplyMeter()
+end
+
+local function BuildMeterPage(parent)
+  local widgets, controls = {}, {}
+
+  local header = U.CreateSectionHeader(parent, {
+    text = "Damage Meter", width = 484, y = -4,
+  })
+  table.insert(widgets, header)
+
+  local layout = QtP:GetLayout()
+
+  local background = U.CreateCheckbox(parent, {
+    name = "QtUiPlusMeterBackground",
+    text = "Show window background",
+    value = layout.meterShowBackground ~= false,
+    onChange = function(value)
+      QtP:GetLayout().meterShowBackground = value and true or false
+      ApplyMeter()
+    end,
+  })
+  background.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -34)
+  table.insert(widgets, background)
+
+  local askInstance = U.CreateCheckbox(parent, {
+    name = "QtUiPlusMeterAskInstance",
+    text = "Ask to reset on entering an instance",
+    value = layout.meterAskInstance == true,
+    onChange = function(value)
+      QtP:GetLayout().meterAskInstance = value and true or false
+    end,
+  })
+  askInstance.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -58)
+  table.insert(widgets, askInstance)
+
+  local i
+  for i = 1, table.getn(METER_SLIDERS) do
+    local spec = METER_SLIDERS[i]
+    local limit = METER_LIMITS[spec.key]
+    local slider = U.CreateSlider(parent, {
+      name = "QtUiPlus" .. spec.key,
+      text = spec.text,
+      width = 200,
+      min = limit.min, max = limit.max, step = limit.step,
+      value = QtP:GetLayout()[spec.key],
+      onChange = function(value) SetMeter(spec.key, value) end,
+    })
+    slider.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -102 - (i - 1) * 44)
+    controls[spec.key] = slider
+    table.insert(widgets, slider)
+  end
+
+  local function Refresh()
+    local current = QtP:GetLayout()
+    background.SetValue(current.meterShowBackground ~= false)
+    askInstance.SetValue(current.meterAskInstance == true)
+    local j
+    for j = 1, table.getn(METER_SLIDERS) do
+      local key = METER_SLIDERS[j].key
+      if controls[key] then controls[key].SetValue(current[key]) end
+    end
+  end
+
+  return widgets, Refresh
+end
+
 function Q:OnInit()
   U.RegisterSettingsTab("qtextras", "Extras", BuildPage)
+  U.RegisterSettingsTab("damagemeter", "Damage Meter", BuildMeterPage)
 end
