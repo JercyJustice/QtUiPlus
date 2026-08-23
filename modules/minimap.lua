@@ -1,7 +1,8 @@
 -- QtUiPlus :: modules/minimap.lua
 --
--- A settings button beside the native minimap, and a mover anchor so the
--- native minimap cluster can be dragged in QtUiPlus's edit mode.
+-- A settings button beside the native minimap, a mover for the minimap
+-- cluster, and dummy anchors so the stock minimap buff/debuff rows can be
+-- placed in Anchor Mode.
 --
 -- The native minimap is kept as it is: no replacement, no reskin, no chrome
 -- suppression. knowledge.json / minimap.render_pass_under_ordinary_frames says
@@ -73,6 +74,91 @@ local function RegisterMinimapMover()
   U.Debug("minimap mover registered on " .. name)
 end
 
+-- Native BuffFrame / DebuffButton row sit next to the minimap. They are not
+-- QtUiPlus-owned, so dummy anchors are the mover targets and the stock frames
+-- are glued to them after every aura update (the client re-points BuffFrame
+-- back to MinimapCluster).
+local BUFF_ANCHOR_W = 200
+local BUFF_ANCHOR_H = 36
+local buffAnchor
+local debuffAnchor
+
+local function Glue(frame, point, relative, relativePoint, x, y)
+  if not frame or not relative then return end
+  pcall(frame.ClearAllPoints, frame)
+  pcall(frame.SetPoint, frame, point, relative, relativePoint, x or 0, y or 0)
+end
+
+local function GlueMinimapAuras()
+  if buffAnchor then
+    Glue(U.G("BuffFrame"), "TOPRIGHT", buffAnchor, "TOPRIGHT", 0, 0)
+    local enchant = U.G("TemporaryEnchantFrame")
+    if enchant then
+      local parentOk, parent = pcall(enchant.GetParent, enchant)
+      -- Already a BuffFrame child: it rides the buffs mover. Independent
+      -- otherwise, so park it on the same anchor rather than leaving it
+      -- stuck to the minimap.
+      if not parentOk or parent ~= U.G("BuffFrame") then
+        Glue(enchant, "TOPRIGHT", buffAnchor, "TOPRIGHT", 0, 0)
+      end
+    end
+  end
+  if debuffAnchor then
+    local row = U.G("DebuffFrame")
+    if not row then row = U.G("DebuffButton1") end
+    Glue(row, "TOPRIGHT", debuffAnchor, "TOPRIGHT", 0, 0)
+  end
+end
+
+local function RegisterMinimapAuraMovers()
+  if buffAnchor then return end
+
+  -- Vanilla cluster is TOPRIGHT 0,0; buffs sit to its left.
+  buffAnchor = CreateFrame("Frame", "QtUiPlusMinimapBuffs", UIParent)
+  buffAnchor:SetWidth(BUFF_ANCHOR_W)
+  buffAnchor:SetHeight(BUFF_ANCHOR_H)
+  pcall(buffAnchor.EnableMouse, buffAnchor, false)
+  pcall(buffAnchor.SetFrameStrata, buffAnchor, "MEDIUM")
+  U.RegisterMover("minimapBuffs", buffAnchor, {
+    label = "Minimap Buffs",
+    default = { point = "TOPRIGHT", relativePoint = "TOPRIGHT", x = -220, y = -12 },
+  })
+
+  debuffAnchor = CreateFrame("Frame", "QtUiPlusMinimapDebuffs", UIParent)
+  debuffAnchor:SetWidth(BUFF_ANCHOR_W)
+  debuffAnchor:SetHeight(BUFF_ANCHOR_H)
+  pcall(debuffAnchor.EnableMouse, debuffAnchor, false)
+  pcall(debuffAnchor.SetFrameStrata, debuffAnchor, "MEDIUM")
+  U.RegisterMover("minimapDebuffs", debuffAnchor, {
+    label = "Minimap Debuffs",
+    default = { point = "TOPRIGHT", relativePoint = "TOPRIGHT", x = -220, y = -90 },
+  })
+
+  GlueMinimapAuras()
+
+  local function QueueGlue()
+    if type(U.DeferOnce) == "function" then
+      U.DeferOnce("minimap.aura-glue", GlueMinimapAuras)
+    else
+      GlueMinimapAuras()
+    end
+  end
+  U.RegisterEvent("PLAYER_AURAS_CHANGED", QueueGlue)
+  U.RegisterEvent("UNIT_AURA", function(event, unit)
+    if unit and unit ~= "player" then return end
+    QueueGlue()
+  end)
+  U.RegisterEvent("PLAYER_ENTERING_WORLD", QueueGlue)
+
+  local buffFrame = U.G("BuffFrame")
+  if buffFrame and type(U.PostHookScript) == "function" then
+    U.PostHookScript(buffFrame, "OnShow", QueueGlue)
+  end
+  if type(U.RegisterUpdate) == "function" then
+    U.RegisterUpdate("minimap.aura-glue", 0.25, GlueMinimapAuras)
+  end
+end
+
 -- Applies the current enabled state to an already-created button. Public so
 -- modules/settings.lua's General page can flip the checkbox without reaching
 -- into this module's internals.
@@ -126,4 +212,5 @@ function MM:OnEnable()
   U.Debug("settings button anchored to " .. anchor)
 
   RegisterMinimapMover()
+  RegisterMinimapAuraMovers()
 end

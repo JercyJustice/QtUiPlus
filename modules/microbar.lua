@@ -55,18 +55,46 @@ local HEIGHT = 23
 -- here as a WORKING_SOURCE width rather than a measured one, scaled down when
 -- fewer candidates resolve on this client.
 local FULL_WIDTH = 145
-local MIN_WIDTH = 20
+local MIN_WIDTH = 40
+local GRIP_SIZE = 14
+local SIZE_LIMITS = {
+  width  = { min = 40, max = 420 },
+  height = { min = 14, max = 64 },
+}
 
 local config
 local anchor
 local buttons = {}   -- name -> captured original state + button reference
+local buttonScale = BUTTON_SCALE
 
 -- ---------------------------------------------------------------------------
 -- Config
 -- ---------------------------------------------------------------------------
 local function EnsureConfig()
-  if not config then config = U.ModuleConfig("microbar", { enabled = true }) end
+  if not config then
+    config = U.ModuleConfig("microbar", {
+      enabled = true,
+      width = FULL_WIDTH,
+      height = HEIGHT,
+    })
+  end
   return config
+end
+
+local function ClampSize(key, value)
+  local limit = SIZE_LIMITS[key]
+  value = tonumber(value)
+  if not value then return nil end
+  if value < limit.min then return limit.min end
+  if value > limit.max then return limit.max end
+  return U.Round(value)
+end
+
+local function StoredSize()
+  EnsureConfig()
+  local w = ClampSize("width", config.width) or FULL_WIDTH
+  local h = ClampSize("height", config.height) or HEIGHT
+  return w, h
 end
 
 -- ---------------------------------------------------------------------------
@@ -117,7 +145,7 @@ local function ArrangeButtons()
       else
         pcall(button.SetPoint, button, "LEFT", anchor, "LEFT", 0, 0)
       end
-      pcall(button.SetScale, button, BUTTON_SCALE)
+      pcall(button.SetScale, button, buttonScale)
       pcall(button.Show, button)
 
       prev = button
@@ -154,10 +182,124 @@ end
 -- ---------------------------------------------------------------------------
 -- Bar frame
 -- ---------------------------------------------------------------------------
+local function ScaleForSize(w, h)
+  local scaleW = (w / FULL_WIDTH) * BUTTON_SCALE
+  local scaleH = (h / HEIGHT) * BUTTON_SCALE
+  local scale = scaleW
+  if scaleH < scale then scale = scaleH end
+  if scale < 0.35 then scale = 0.35 end
+  if scale > 1.15 then scale = 1.15 end
+  return scale
+end
+
+local function ReadAnchorSize()
+  if not anchor then return StoredSize() end
+  local w = tonumber(anchor:GetWidth())
+  local h = tonumber(anchor:GetHeight())
+  local okL, left = pcall(anchor.GetLeft, anchor)
+  local okR, right = pcall(anchor.GetRight, anchor)
+  local okT, top = pcall(anchor.GetTop, anchor)
+  local okB, bottom = pcall(anchor.GetBottom, anchor)
+  if okL and okR and tonumber(left) and tonumber(right) then
+    local edgeW = math.abs(right - left)
+    if edgeW > 1 then w = edgeW end
+  end
+  if okT and okB and tonumber(top) and tonumber(bottom) then
+    local edgeH = math.abs(top - bottom)
+    if edgeH > 1 then h = edgeH end
+  end
+  return ClampSize("width", w) or FULL_WIDTH, ClampSize("height", h) or HEIGHT
+end
+
+local function LayoutBar(w, h)
+  if not anchor then return end
+  w = ClampSize("width", w) or FULL_WIDTH
+  h = ClampSize("height", h) or HEIGHT
+  buttonScale = ScaleForSize(w, h)
+  ArrangeButtons()
+  anchor:SetWidth(w)
+  anchor:SetHeight(h)
+end
+
+local function CommitResize()
+  if not anchor then return end
+  local w, h = ReadAnchorSize()
+  EnsureConfig()
+  config.width = w
+  config.height = h
+  LayoutBar(w, h)
+  if type(U.GetFramePoint) == "function" and type(U.SavePosition) == "function" then
+    local point, _, relativePoint, x, y = U.GetFramePoint(anchor, 1)
+    if point then U.SavePosition("microbar", point, relativePoint, x, y) end
+  end
+end
+
+local function AttachResizeGrip()
+  if not anchor or anchor.qtpResizeGrip then return end
+
+  local grip = CreateFrame("Button", "QtUiPlusMicroBarGrip", anchor)
+  grip:SetWidth(GRIP_SIZE)
+  grip:SetHeight(GRIP_SIZE)
+  grip:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT", 2, -2)
+  pcall(grip.EnableMouse, grip, true)
+  grip:RegisterForDrag("LeftButton")
+
+  local levelOk, level = pcall(anchor.GetFrameLevel, anchor)
+  if levelOk and tonumber(level) then
+    pcall(grip.SetFrameLevel, grip, tonumber(level) + 30)
+  end
+
+  local icon = grip:CreateTexture(nil, "ARTWORK")
+  pcall(icon.SetTexture, icon, M.texture.chatResizeGrip)
+  icon:SetAllPoints(grip)
+
+  grip:SetScript("OnDragStart", function()
+    if not U.IsUnlocked or not U.IsUnlocked() then return end
+    pcall(anchor.SetResizable, anchor, true)
+    pcall(anchor.SetMinResize, anchor,
+          SIZE_LIMITS.width.min, SIZE_LIMITS.height.min)
+    pcall(anchor.SetMaxResize, anchor,
+          SIZE_LIMITS.width.max, SIZE_LIMITS.height.max)
+    pcall(anchor.StartSizing, anchor, "BOTTOMRIGHT")
+    if type(U.RegisterUpdate) == "function" then
+      U.RegisterUpdate("microbar.resize", 0, function()
+        local liveW, liveH = ReadAnchorSize()
+        LayoutBar(liveW, liveH)
+      end)
+    end
+  end)
+  grip:SetScript("OnDragStop", function()
+    if type(U.UnregisterUpdate) == "function" then
+      U.UnregisterUpdate("microbar.resize")
+    end
+    pcall(anchor.StopMovingOrSizing, anchor)
+    CommitResize()
+  end)
+
+  anchor.qtpResizeGrip = grip
+  grip:Hide()
+end
+
+local function UpdateResizeGrip()
+  local grip = anchor and anchor.qtpResizeGrip
+  if not grip then return end
+  local show = config and config.enabled and U.IsUnlocked and U.IsUnlocked()
+  if show then
+    local levelOk, level = pcall(anchor.GetFrameLevel, anchor)
+    if levelOk and tonumber(level) then
+      pcall(grip.SetFrameLevel, grip, tonumber(level) + 30)
+    end
+    pcall(grip.Show, grip)
+  else
+    pcall(grip.Hide, grip)
+  end
+end
+
 local function Build()
   anchor = CreateFrame("Frame", "QtUiPlusMicroBarAnchor", UIParent)
-  anchor:SetHeight(HEIGHT)
-  anchor:SetWidth(MIN_WIDTH)
+  local w, h = StoredSize()
+  anchor:SetWidth(w)
+  anchor:SetHeight(h)
   pcall(anchor.SetFrameStrata, anchor, "MEDIUM")
 
   U.RegisterMover("microbar", anchor, {
@@ -167,6 +309,7 @@ local function Build()
     -- edit mode; see core/mover.lua.
     visible = function() return config and config.enabled end,
   })
+  AttachResizeGrip()
 end
 
 -- Applies the current enabled state: installs (and sizes the bar around)
@@ -177,6 +320,7 @@ local function Apply()
   if not config.enabled then
     RestoreButtons()
     anchor:Hide()
+    UpdateResizeGrip()
     return
   end
 
@@ -188,14 +332,10 @@ local function Apply()
   end
 
   local count = ArrangeButtons()
-
-  local width = MIN_WIDTH
-  if count > 0 then
-    width = U.Round(FULL_WIDTH * count / table.getn(BUTTON_NAMES))
-    if width < MIN_WIDTH then width = MIN_WIDTH end
-  end
-  anchor:SetWidth(width)
+  local w, h = StoredSize()
+  LayoutBar(w, h)
   anchor:Show()
+  UpdateResizeGrip()
 
   if count == 0 then
     U.Debug("microbar: none of the " .. table.getn(BUTTON_NAMES) ..
@@ -235,4 +375,7 @@ function MB:OnEnable()
   EnsureConfig()
   if not anchor then Build() end
   Apply()
+  if type(U.RegisterUpdate) == "function" then
+    U.RegisterUpdate("microbar.grip", 0.2, UpdateResizeGrip)
+  end
 end
