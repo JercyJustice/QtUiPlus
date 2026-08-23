@@ -30,6 +30,7 @@ local HEADER_HEIGHT = 46
 local FOOTER_HEIGHT = 46
 
 local panel, sidebar, content
+local sidebarView, contentView
 local entries = {}     -- ordered: { kind, id, label, build, parent, expanded, ... }
 local rows = {}        -- sidebar row button pool
 local activePage       -- entry currently shown in the content area
@@ -225,10 +226,11 @@ local function StyleRow(row, entry, selected)
 end
 
 local function CreateRow(index)
-  local row = U.CreateButton(sidebar, {
+  local host = (sidebarView and sidebarView.child) or sidebar
+  local row = U.CreateButton(host, {
     name = "QtUiPlusSettingsRow" .. index,
     text = "",
-    width = SIDEBAR_WIDTH - 12,
+    width = SIDEBAR_WIDTH - 20,
     height = ROW_HEIGHT,
     border = false,
   })
@@ -272,6 +274,10 @@ local function CreateRow(index)
     if tooltip then pcall(tooltip.Hide, tooltip) end
   end)
 
+  if sidebarView and sidebarView.AttachWheel then
+    sidebarView.AttachWheel(row)
+  end
+
   rows[index] = row
   return row
 end
@@ -287,7 +293,8 @@ RenderSidebar = function()
     local row = rows[i] or CreateRow(i)
 
     row:ClearAllPoints()
-    row:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 6,
+    local host = (sidebarView and sidebarView.child) or sidebar
+    row:SetPoint("TOPLEFT", host, "TOPLEFT", 6,
                  -6 - (i - 1) * (ROW_HEIGHT + ROW_GAP))
 
     -- Pages under a group sit one indent in, so the list reads as a tree
@@ -333,11 +340,56 @@ RenderSidebar = function()
     if row.indicator then row.indicator:Hide() end
     row:Hide()
   end
+
+  if sidebarView and sidebarView.SetContentHeight then
+    local count = table.getn(visible)
+    sidebarView.SetContentHeight(12 + count * (ROW_HEIGHT + ROW_GAP))
+  end
 end
 
 -- ---------------------------------------------------------------------------
 -- Pages
 -- ---------------------------------------------------------------------------
+local function RegionBottom(region)
+  if not region then return nil end
+  if region.qtpParts then
+    local i, lowest
+    for i = 1, table.getn(region.qtpParts) do
+      local bottom = RegionBottom(region.qtpParts[i])
+      if bottom and (not lowest or bottom < lowest) then lowest = bottom end
+    end
+    return lowest
+  end
+  if region.IsShown then
+    local ok, shown = pcall(region.IsShown, region)
+    if ok and (shown == false or shown == 0 or shown == "0") then return nil end
+  end
+  if not region.GetBottom then return nil end
+  local ok, bottom = pcall(region.GetBottom, region)
+  if ok then return tonumber(bottom) end
+end
+
+local function MeasureContent(list)
+  if not content then return 1 end
+  local ok, top = pcall(content.GetTop, content)
+  top = (ok and tonumber(top)) or 0
+  local lowest = top
+  local i
+  for i = 1, table.getn(list or {}) do
+    local bottom = RegionBottom(list[i])
+    if bottom and bottom < lowest then lowest = bottom end
+  end
+  local height = top - lowest + 16
+  local viewH = 0
+  if contentView and contentView.view and contentView.view.GetHeight then
+    local vok, vh = pcall(contentView.view.GetHeight, contentView.view)
+    if vok then viewH = tonumber(vh) or 0 end
+  end
+  if height < viewH then height = viewH end
+  if height < 1 then height = 1 end
+  return height
+end
+
 SelectPage = function(entry)
   if not entry or entry.kind ~= "page" then return end
 
@@ -359,6 +411,23 @@ SelectPage = function(entry)
 
   SetListShown(entry.widgets, true)
   if type(entry.refresh) == "function" then entry.refresh() end
+
+  if contentView then
+    local function AttachList(list)
+      local n
+      for n = 1, table.getn(list or {}) do
+        local region = list[n]
+        if region and region.qtpParts then
+          AttachList(region.qtpParts)
+        elseif region and region.SetScript then
+          contentView.AttachWheel(region)
+        end
+      end
+    end
+    AttachList(entry.widgets)
+    contentView.Apply(0)
+    contentView.SetContentHeight(MeasureContent(entry.widgets))
+  end
 
   activePage = entry
   focusedId = entry.id
@@ -404,7 +473,19 @@ local function HideContents()
   for i = 1, table.getn(entries) do SetListShown(entries[i].widgets, false) end
 
   sidebar:Hide()
-  content:Hide()
+  if content then content:Hide() end
+  if sidebarView then
+    pcall(sidebarView.view.Hide, sidebarView.view)
+    pcall(sidebarView.child.Hide, sidebarView.child)
+    pcall(sidebarView.track.Hide, sidebarView.track)
+    pcall(sidebarView.thumb.Hide, sidebarView.thumb)
+  end
+  if contentView then
+    pcall(contentView.view.Hide, contentView.view)
+    pcall(contentView.child.Hide, contentView.child)
+    pcall(contentView.track.Hide, contentView.track)
+    pcall(contentView.thumb.Hide, contentView.thumb)
+  end
 end
 
 local function Hide()
@@ -486,11 +567,27 @@ local function Build()
   })
   sidebar:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -HEADER_HEIGHT)
 
-  -- The content frame is a positioning anchor. Its children are toggled through
-  -- the owning page's widget list, never through this frame.
-  content = CreateFrame("Frame", "QtUiPlusSettingsContent", panel)
-  content:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", 12, 0)
-  content:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, FOOTER_HEIGHT)
+  sidebarView = U.CreateScrollView(sidebar, {
+    name = "QtUiPlusSettingsSidebarScroll",
+    childWidth = SIDEBAR_WIDTH - 10,
+  })
+  sidebarView.view:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 2, -2)
+  sidebarView.view:SetPoint("BOTTOMRIGHT", sidebar, "BOTTOMRIGHT", -10, 2)
+  sidebarView.track:SetPoint("TOPRIGHT", sidebar, "TOPRIGHT", -2, -2)
+  sidebarView.track:SetPoint("BOTTOMRIGHT", sidebar, "BOTTOMRIGHT", -2, 2)
+  sidebarView.AttachWheel(sidebar)
+
+  -- Pages parent their widgets to this child. The ScrollFrame clips and
+  -- offsets it (wiki ScrollFrame SetScrollChild).
+  contentView = U.CreateScrollView(panel, {
+    name = "QtUiPlusSettingsContentScroll",
+    childWidth = 486,
+  })
+  contentView.view:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", 12, 0)
+  contentView.view:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -20, FOOTER_HEIGHT)
+  contentView.track:SetPoint("TOPLEFT", contentView.view, "TOPRIGHT", 2, 0)
+  contentView.track:SetPoint("BOTTOMLEFT", contentView.view, "BOTTOMRIGHT", 2, 0)
+  content = contentView.child
 
   panel.close = U.CreateButton(panel, {
     name = "QtUiPlusSettingsClose",
@@ -504,7 +601,15 @@ local function Build()
 
   panel:Hide()
   sidebar:Hide()
-  content:Hide()
+  if content then content:Hide() end
+  if sidebarView then
+    pcall(sidebarView.view.Hide, sidebarView.view)
+    pcall(sidebarView.track.Hide, sidebarView.track)
+  end
+  if contentView then
+    pcall(contentView.view.Hide, contentView.view)
+    pcall(contentView.track.Hide, contentView.track)
+  end
   SetListShown(panel.chrome, false)
 end
 
@@ -530,7 +635,15 @@ function U.OpenSettings(keepOpen)
 
   panel:Show()
   sidebar:Show()
-  content:Show()
+  if sidebarView then
+    pcall(sidebarView.view.Show, sidebarView.view)
+    pcall(sidebarView.child.Show, sidebarView.child)
+  end
+  if contentView then
+    pcall(contentView.view.Show, contentView.view)
+    pcall(contentView.child.Show, contentView.child)
+  end
+  if content then content:Show() end
   SetListShown(panel.chrome, true)
 
   RenderSidebar()

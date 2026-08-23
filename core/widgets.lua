@@ -316,6 +316,156 @@ function U.CreateCyclePicker(parent, options)
 end
 
 -- ---------------------------------------------------------------------------
+-- Scroll view
+--
+-- Emberveil ScrollFrame clips and offsets a child (wiki ScrollFrame). Native
+-- Slider chrome is not used: it produced no visible control for settings
+-- sliders, so the bar is a Button track plus a Button thumb. Wheel and track
+-- clicks change the offset; SetVerticalScroll is clamped here because a
+-- ScrollFrame without a nested slider stores the value unclamped.
+-- ---------------------------------------------------------------------------
+function U.CreateScrollView(parent, options)
+  options = options or {}
+  local name = options.name
+  local step = tonumber(options.step) or 28
+  local barW = 8
+
+  local view = CreateFrame("ScrollFrame", name, parent)
+  pcall(view.EnableMouse, view, true)
+  pcall(view.EnableMouseWheel, view, true)
+
+  local child = CreateFrame("Frame", name and (name .. "Child") or nil, view)
+  child:SetWidth(options.childWidth or options.width or 100)
+  child:SetHeight(1)
+  pcall(view.SetScrollChild, view, child)
+  pcall(child.EnableMouseWheel, child, true)
+
+  local track = CreateFrame("Button", name and (name .. "Track") or nil, parent)
+  track:SetWidth(barW)
+  U.CreateBackdrop(track, { background = { 0.02, 0.02, 0.02, 0.90 } })
+  pcall(track.EnableMouse, track, true)
+
+  local thumb = CreateFrame("Button", name and (name .. "Thumb") or nil, track)
+  thumb:SetWidth(barW)
+  thumb:SetHeight(16)
+  U.CreateBackdrop(thumb, { background = M.color.accentDim, border = M.color.accent })
+  pcall(thumb.EnableMouse, thumb, true)
+
+  local control = {
+    view = view,
+    child = child,
+    track = track,
+    thumb = thumb,
+    offset = 0,
+    qtpParts = { view, child, track, thumb },
+  }
+
+  local function Range()
+    local viewH = 0
+    local childH = 0
+    local ok, value = pcall(view.GetHeight, view)
+    if ok then viewH = tonumber(value) or 0 end
+    ok, value = pcall(child.GetHeight, child)
+    if ok then childH = tonumber(value) or 0 end
+    local extra = childH - viewH
+    if extra < 0 then extra = 0 end
+    return extra, viewH, childH
+  end
+
+  local function PlaceThumb()
+    local extra, viewH, childH = Range()
+    if extra <= 0 or viewH <= 0 then
+      pcall(track.Hide, track)
+      pcall(thumb.Hide, thumb)
+      return
+    end
+    pcall(track.Show, track)
+    pcall(thumb.Show, thumb)
+    local ok, trackH = pcall(track.GetHeight, track)
+    trackH = (ok and tonumber(trackH)) or viewH
+    local thumbH = viewH / childH * trackH
+    if thumbH < 16 then thumbH = 16 end
+    if thumbH > trackH then thumbH = trackH end
+    thumb:SetHeight(thumbH)
+    local travel = trackH - thumbH
+    local y = 0
+    if extra > 0 and travel > 0 then
+      y = -(control.offset / extra) * travel
+    end
+    thumb:ClearAllPoints()
+    thumb:SetPoint("TOPLEFT", track, "TOPLEFT", 0, y)
+    thumb:SetWidth(barW)
+  end
+
+  local function Apply(offset)
+    local extra = Range()
+    offset = tonumber(offset) or 0
+    if offset < 0 then offset = 0 end
+    if offset > extra then offset = extra end
+    control.offset = offset
+    pcall(view.SetVerticalScroll, view, offset)
+    PlaceThumb()
+  end
+
+  local function OnWheel()
+    local delta = tonumber(arg1) or 0
+    if delta > 0 then delta = 1 else delta = -1 end
+    Apply(control.offset - delta * step)
+  end
+
+  view:SetScript("OnMouseWheel", OnWheel)
+  child:SetScript("OnMouseWheel", OnWheel)
+  track:SetScript("OnMouseWheel", OnWheel)
+  thumb:SetScript("OnMouseWheel", OnWheel)
+
+  track:SetScript("OnClick", function()
+    local extra, viewH = Range()
+    if extra <= 0 then return end
+    local cursorFn = U.G("GetCursorPosition")
+    local scaleFn = view.GetEffectiveScale
+    if type(cursorFn) ~= "function" then
+      Apply(control.offset + viewH)
+      return
+    end
+    local ok, _, cy = pcall(cursorFn)
+    if not ok or not cy then return end
+    local scale = 1
+    if type(scaleFn) == "function" then
+      local sok, s = pcall(scaleFn, view)
+      if sok and tonumber(s) and s > 0 then scale = s end
+    end
+    cy = cy / scale
+    local tok, top = pcall(track.GetTop, track)
+    local bok, bottom = pcall(track.GetBottom, track)
+    if not (tok and bok and tonumber(top) and tonumber(bottom)) then return end
+    local span = top - bottom
+    if span <= 0 then return end
+    local t = (top - cy) / span
+    if t < 0 then t = 0 end
+    if t > 1 then t = 1 end
+    Apply(t * extra)
+  end)
+
+  control.Apply = Apply
+  control.OnMouseWheel = OnWheel
+  control.AttachWheel = function(frame)
+    if not frame then return end
+    pcall(frame.EnableMouseWheel, frame, true)
+    frame:SetScript("OnMouseWheel", OnWheel)
+  end
+  control.SetContentHeight = function(height)
+    height = tonumber(height) or 1
+    if height < 1 then height = 1 end
+    child:SetHeight(height)
+    pcall(view.UpdateScrollChildRect, view)
+    Apply(control.offset)
+  end
+
+  PlaceThumb()
+  return control
+end
+
+-- ---------------------------------------------------------------------------
 -- Color picker
 --
 -- A small swatch button plus its own label, in the same shape as
