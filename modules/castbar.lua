@@ -173,8 +173,9 @@ end
 
 -- Rebuilds icon cell, progress cell and fill from a new outer size. The icon
 -- stays square (equal to height) so stretching the bar only lengthens the
--- progress cell.
-local function LayoutWidget(widget, width, height)
+-- progress cell. skipOuter is set while StartSizing owns the container, so
+-- this does not fight the drag with a second SetWidth.
+local function LayoutWidget(widget, width, height, skipOuter)
   if not widget then return end
   width = ClampSize("width", width)
   height = ClampSize("height", height)
@@ -182,12 +183,17 @@ local function LayoutWidget(widget, width, height)
   local barWidth = width - iconSize
   local border = U.BorderSize()
 
-  widget:SetWidth(width)
-  widget:SetHeight(height)
+  if not skipOuter then
+    widget:SetWidth(width)
+    widget:SetHeight(height)
+  end
 
   if widget.iconCell then
     widget.iconCell:SetWidth(iconSize)
     widget.iconCell:SetHeight(height)
+    widget.iconCell:ClearAllPoints()
+    widget.iconCell:SetPoint("TOPLEFT", widget, "TOPLEFT", 0, 0)
+    widget.iconCell:SetPoint("BOTTOMLEFT", widget, "BOTTOMLEFT", 0, 0)
   end
   if widget.barCell then
     widget.barCell:SetWidth(barWidth)
@@ -195,16 +201,27 @@ local function LayoutWidget(widget, width, height)
     widget.barCell:ClearAllPoints()
     if widget.iconCell then
       widget.barCell:SetPoint("TOPLEFT", widget.iconCell, "TOPRIGHT", 0, 0)
+    else
+      widget.barCell:SetPoint("TOPLEFT", widget, "TOPLEFT", 0, 0)
     end
+    widget.barCell:SetPoint("BOTTOMRIGHT", widget, "BOTTOMRIGHT", 0, 0)
   end
   if widget.bar then
-    widget.bar:SetWidth(barWidth - 2 * border)
-    widget.bar:SetHeight(height - 2 * border)
-    -- Fill is laid out from GetWidth; rewrite the current value so it
-    -- re-anchors instead of keeping the old extent.
-    local value = widget.bar.qtpValue
-    widget.bar.qtpValue = nil
-    pcall(widget.bar.SetValue, widget.bar, value)
+    local innerW = barWidth - 2 * border
+    local innerH = height - 2 * border
+    widget.bar:ClearAllPoints()
+    widget.bar:SetPoint("TOPLEFT", widget.barCell, "TOPLEFT", border, -border)
+    widget.bar:SetPoint("BOTTOMRIGHT", widget.barCell, "BOTTOMRIGHT",
+                        -border, border)
+    if U.SizeStatusBar then
+      U.SizeStatusBar(widget.bar, innerW, innerH)
+    else
+      widget.bar:SetWidth(innerW)
+      widget.bar:SetHeight(innerH)
+      local value = widget.bar.qtpValue
+      widget.bar.qtpValue = nil
+      pcall(widget.bar.SetValue, widget.bar, value)
+    end
   end
   if widget.name then
     pcall(widget.name.SetWidth, widget.name, math.max(20, barWidth - 34))
@@ -219,8 +236,7 @@ local function ApplyStoredSize(widget, prefix)
   LayoutWidget(widget, cfg[prefix .. "Width"], cfg[prefix .. "Height"])
 end
 
-local function CommitWidgetResize(widget, prefix, moverId)
-  if not widget then return end
+local function ReadWidgetSize(widget)
   local w, h
   if widget.GetWidth then
     local ok, value = pcall(widget.GetWidth, widget)
@@ -230,6 +246,26 @@ local function CommitWidgetResize(widget, prefix, moverId)
     local ok, value = pcall(widget.GetHeight, widget)
     if ok then h = tonumber(value) end
   end
+  -- StartSizing can stretch the on-screen box without updating GetWidth on
+  -- this client. The edge readback is the size the user actually dragged.
+  local okL, left = pcall(widget.GetLeft, widget)
+  local okR, right = pcall(widget.GetRight, widget)
+  local okT, top = pcall(widget.GetTop, widget)
+  local okB, bottom = pcall(widget.GetBottom, widget)
+  if okL and okR and tonumber(left) and tonumber(right) then
+    local edgeW = math.abs(right - left)
+    if edgeW > 1 and (not w or math.abs(edgeW - w) > 1) then w = edgeW end
+  end
+  if okT and okB and tonumber(top) and tonumber(bottom) then
+    local edgeH = math.abs(top - bottom)
+    if edgeH > 1 and (not h or math.abs(edgeH - h) > 1) then h = edgeH end
+  end
+  return w, h
+end
+
+local function CommitWidgetResize(widget, prefix, moverId)
+  if not widget then return end
+  local w, h = ReadWidgetSize(widget)
   LayoutWidget(widget, w, h)
   local cfg = SizeConfig()
   cfg[prefix .. "Width"] = widget.qtpWidth
@@ -269,8 +305,17 @@ local function AttachResizeGrip(widget, prefix, moverId)
     pcall(widget.SetMaxResize, widget,
           SIZE_LIMITS.width.max, SIZE_LIMITS.height.max)
     pcall(widget.StartSizing, widget, "BOTTOMRIGHT")
+    if type(U.RegisterUpdate) == "function" then
+      U.RegisterUpdate("castbar.resize", 0, function()
+        local liveW, liveH = ReadWidgetSize(widget)
+        LayoutWidget(widget, liveW, liveH, true)
+      end)
+    end
   end)
   grip:SetScript("OnDragStop", function()
+    if type(U.UnregisterUpdate) == "function" then
+      U.UnregisterUpdate("castbar.resize")
+    end
     pcall(widget.StopMovingOrSizing, widget)
     CommitWidgetResize(widget, prefix, moverId)
   end)

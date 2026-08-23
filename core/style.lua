@@ -211,9 +211,9 @@ local function UpdateStatusBarFill(bar)
 
   local size
   if bar.qtpVertical then
-    size = tonumber(bar:GetHeight())
+    size = tonumber(bar.qtpLayoutHeight) or tonumber(bar:GetHeight())
   else
-    size = tonumber(bar:GetWidth())
+    size = tonumber(bar.qtpLayoutWidth) or tonumber(bar:GetWidth())
   end
   size = size or 0
 
@@ -309,6 +309,32 @@ function U.CreateStatusBar(parent, options)
 
   UpdateStatusBarFill(bar)
   return bar
+end
+
+-- Re-stamp a bar after its outer size changed. SetWidth alone does not
+-- reliably move a SetAllPoints background on this client, and GetWidth can
+-- stay at the old value through a StartSizing drag, so callers pass the
+-- intended extent and this re-anchors the fill from that number.
+function U.SizeStatusBar(bar, width, height)
+  if not bar then return end
+  width = tonumber(width)
+  height = tonumber(height)
+  if width then
+    bar.qtpLayoutWidth = width
+    pcall(bar.SetWidth, bar, width)
+  end
+  if height then
+    bar.qtpLayoutHeight = height
+    pcall(bar.SetHeight, bar, height)
+  end
+  local bg = bar.qtpBackground
+  if bg then
+    bg:ClearAllPoints()
+    bg:SetAllPoints(bar)
+  end
+  local value = bar.qtpValue
+  bar.qtpValue = nil
+  if bar.SetValue then pcall(bar.SetValue, bar, value) end
 end
 
 -- Unit-frame bars: a left-to-right dark-to-light fill plus an additive shine.
