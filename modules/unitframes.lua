@@ -2334,10 +2334,10 @@ end
 local function ShowFrameTooltip(owner, unit)
   local tooltip = U.G("GameTooltip")
   if not tooltip then return end
-  local anchor = U.G("GameTooltip_SetDefaultAnchor")
-  if type(anchor) ~= "function" or not pcall(anchor, tooltip, owner) then
-    pcall(tooltip.SetOwner, tooltip, owner, "ANCHOR_RIGHT")
-  end
+  -- ANCHOR_RIGHT, not GameTooltip_SetDefaultAnchor: the default cursor
+  -- anchor sits the tooltip on top of the frame, so the mouse "leaves"
+  -- the click layer and the tooltip vanishes immediately.
+  pcall(tooltip.SetOwner, tooltip, owner, "ANCHOR_RIGHT")
   if pcall(tooltip.SetUnit, tooltip, unit) then
     pcall(tooltip.Show, tooltip)
   end
@@ -2346,9 +2346,7 @@ end
 local function HideFrameTooltip()
   local tooltip = U.G("GameTooltip")
   if not tooltip then return end
-  if not pcall(tooltip.FadeOut, tooltip) then
-    pcall(tooltip.Hide, tooltip)
-  end
+  pcall(tooltip.Hide, tooltip)
 end
 
 local function BindUnitClicks(click, frame)
@@ -2390,11 +2388,10 @@ local function BindUnitClicks(click, frame)
 end
 
 local function EnableMouse(frame)
-  pcall(frame.EnableMouse, frame, true)
-  BindUnitClicks(frame, frame)
+  -- Clicks and hover live on the overlay only. Binding OnLeave on the parent
+  -- as well fired as soon as the mouse hit the overlay, which hid the tooltip.
+  pcall(frame.EnableMouse, frame, false)
 
-  -- Cover bars and portrait so a click lands even when those children
-  -- eat mouse input. Same overlay QtUI uses (frame level +5; mover is +10).
   if not frame.qtpClick then
     local click = CreateFrame("Button", frame:GetName() and
                               (frame:GetName() .. "Click") or nil, frame)
