@@ -56,6 +56,15 @@ Everything QtUI had that the base did not:
 Cooldown text was *not* ported: the base already renders it on action buttons and
 auras, with colour tiers.
 
+## Changed from the base
+
+**Stance bar is no longer warrior-only.** UnrealUI built `modules/stancebar.lua`
+only for warriors, leaving druids, rogues, priests and paladins with no bar at
+all. QtUiPlus gates on the form count instead of the class, which the client wiki
+supports directly: `GetNumShapeshiftForms()` returns the slots the player
+actually has, and `0` for a class with no stance bar. A class with no forms still
+never gets a frame, a button or a mover built.
+
 ## Architecture notes
 
 `core/qtcompat.lua` is the bridge. The ported QtUI modules keep their original

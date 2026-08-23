@@ -9,7 +9,7 @@ QtUiPlus = {}
 local U = QtUiPlus
 
 U.name      = "QtUiPlus"
-U.version   = "0.1.0"
+U.version   = "0.2.0"
 U.modules   = {}       -- name -> module table
 U.moduleOrder = {}     -- load/enable order, registration order
 U.ready     = false    -- set once PLAYER_LOGIN work has run

@@ -1,11 +1,18 @@
 -- QtUiPlus :: modules/stancebar.lua
 --
--- The warrior stance bar (Battle/Defensive/Berserker Stance), in the
--- pfUI-modern button style shared with modules/actionbar.lua and
--- modules/petbar.lua. Warrior only, per .claude/rules/unreal-ui.md ("a
--- feature existing in pfUI is not sufficient reason to add it to QtUiPlus") --
--- this module never creates its bar, its native suppression or its mover for
--- any other class.
+-- The stance / shapeshift bar, in the pfUI-modern button style shared with
+-- modules/actionbar.lua and modules/petbar.lua. Warrior stances, druid forms,
+-- rogue Stealth, priest Shadowform and paladin auras all drive the same native
+-- ShapeshiftButton1-10 and are all handled here.
+--
+-- CLASS GATE REMOVED (QtUiPlus): the UnrealUI original built this bar only for
+-- warriors, which left every other stance-using class with no bar at all. QtUI
+-- drives it from the form count for any class, which is the behaviour kept
+-- here. No class test is needed to do that safely --
+-- emberveil.org/wiki/lua/globals/Spell documents GetNumShapeshiftForms as
+-- returning "how many stance / shapeshift bar slots the player currently has",
+-- including 0 for a class with no stance bar, so the count IS the gate. A mage
+-- or hunter still never gets a frame, a mover or a button built.
 --
 -- Compatibility notes that shaped this file:
 --
@@ -47,7 +54,11 @@ local COLOR = {
 local frame, buttons = nil, {}
 local shown = false
 local slotCount = 0
-local isWarrior = false
+-- Latched once the player is known to have forms, so an unlocked edit-mode
+-- placeholder is offered to a class that has a bar but has momentarily
+-- reported zero slots (the login race noted in Layout), and never to a class
+-- that has none at all.
+local everHadForms = false
 
 -- ---------------------------------------------------------------------------
 -- Client calls
@@ -228,6 +239,25 @@ local function ForEachButton(callback)
   for i = 1, table.getn(buttons) do callback(buttons[i]) end
 end
 
+-- Highest occupied slot, not the number of occupied slots: buttons are indexed
+-- by form id, so a gap must still be spanned or every button past it would be
+-- drawn against the wrong form. GetShapeshiftFormInfo "returns no values if id
+-- is out of range or the slot has no spell" (client wiki), so a slot with no
+-- texture is an empty well -- which is what kept a warrior from being given
+-- ten of them when the raw count over-reports.
+local function CountForms()
+  local raw = tonumber(Call("GetNumShapeshiftForms")) or 0
+  if raw > MAX_SLOTS then raw = MAX_SLOTS end
+
+  local highest = 0
+  local i
+  for i = 1, raw do
+    local texture = GetFormInfo(i)
+    if texture then highest = i end
+  end
+  return highest
+end
+
 -- ---------------------------------------------------------------------------
 -- Layout
 -- ---------------------------------------------------------------------------
@@ -251,11 +281,14 @@ end
 local function Layout()
   if not frame then return end
 
-  slotCount = tonumber(Call("GetNumShapeshiftForms")) or 0
+  slotCount = CountForms()
+  if slotCount > 0 then everHadForms = true end
   -- A bar with zero forms (a brief race right after login, before the
   -- spellbook is synced) could never be dragged into place: keep the same
   -- unlocked-placeholder rule modules/petbar.lua and modules/castbar.lua use.
-  local visible = isWarrior and (slotCount > 0 or U.IsUnlocked())
+  -- Gated on everHadForms so a class with no stance bar is not offered an
+  -- empty placeholder every time edit mode opens.
+  local visible = slotCount > 0 or (U.IsUnlocked() and everHadForms)
   local count = slotCount > 0 and slotCount or 3
   if count > MAX_SLOTS then count = MAX_SLOTS end
 
@@ -280,8 +313,15 @@ local function Layout()
 end
 
 local function Apply()
-  if not isWarrior then return end
-  if not frame then CreateBar() end
+  -- The form count is the gate (see the header). Nothing is built for a class
+  -- that has never reported a slot, so a mage pays one API call per sweep and
+  -- gets no frame, no buttons and no mover.
+  if not frame then
+    if not everHadForms and (tonumber(Call("GetNumShapeshiftForms")) or 0) < 1 then
+      return
+    end
+    CreateBar()
+  end
   Layout()
 end
 
@@ -317,10 +357,9 @@ local function RegisterEvents()
 end
 
 function SB:OnEnable()
-  local _, class = Call("UnitClass", "player")
-  isWarrior = (class == "WARRIOR")
-  if not isWarrior then return end
-
+  -- Suppression is unconditional: ShapeshiftBarFrame and its buttons exist for
+  -- every class, and hiding a bar a class never populates costs nothing, while
+  -- skipping it for a druid would leave the native bar drawn over this one.
   SuppressNativeBar()
   Apply()
   RegisterEvents()
@@ -336,7 +375,7 @@ end
 -- Reported by /qtp check.
 function U.StanceBarReport()
   return {
-    isWarrior = isWarrior,
+    everHadForms = everHadForms,
     created = frame and true or false,
     shown = shown,
     slotCount = slotCount,

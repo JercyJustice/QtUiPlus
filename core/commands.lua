@@ -190,13 +190,13 @@ local function ShowUnitFrameCheck()
     end
   end
 
-  -- Warriors only. modules/stancebar.lua never creates its bar/mover for any
-  -- other class, so isWarrior false with created false is the expected line
-  -- for everyone else.
+  -- Any stance-using class. modules/stancebar.lua gates on the form count
+  -- rather than the class, so "forms 0, created false" is the expected line
+  -- for a class with no stance bar at all (mage, hunter, warlock).
   if type(U.StanceBarReport) == "function" then
     local sb = U.StanceBarReport()
     if sb then
-      U.Print("stance bar: warrior " .. tostring(sb.isWarrior) ..
+      U.Print("stance bar: hasForms " .. tostring(sb.everHadForms) ..
               ", created " .. tostring(sb.created) ..
               ", shown " .. tostring(sb.shown) ..
               ", forms " .. tostring(sb.slotCount))
