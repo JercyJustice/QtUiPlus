@@ -461,6 +461,7 @@ local function HideContents()
   -- at the hidden control. Closing without accepting also restores whatever
   -- colour was live-previewed, so an abandoned edit does not silently stick.
   if type(U.CloseColorPicker) == "function" then U.CloseColorPicker(false) end
+  if type(U.HideConfirm) == "function" then U.HideConfirm("settings-reset") end
 
   SetListShown(panel.chrome, false)
 
@@ -599,6 +600,38 @@ local function Build()
   panel.close:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 12)
   table.insert(panel.chrome, panel.close)
 
+  -- Under the sidebar, not on the General page: these two are modes that
+  -- close the window, so they stay visible on every tab.
+  panel.anchor = U.CreateButton(panel, {
+    name = "QtUiPlusSettingsAnchor",
+    text = "Anchor Mode",
+    width = SIDEBAR_WIDTH,
+    height = 24,
+    onClick = function()
+      Hide()
+      U.UnlockUI()
+    end,
+  })
+  panel.anchor:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 12, 12)
+  table.insert(panel.chrome, panel.anchor)
+
+  panel.quickbind = U.CreateButton(panel, {
+    name = "QtUiPlusSettingsQuickBind",
+    text = "Quick Binding",
+    width = 120,
+    height = 24,
+    onClick = function()
+      Hide()
+      if type(U.OpenQuickBind) == "function" then
+        U.OpenQuickBind()
+      else
+        U.Error("quick binding is not available in this build")
+      end
+    end,
+  })
+  panel.quickbind:SetPoint("LEFT", panel.anchor, "RIGHT", 8, 0)
+  table.insert(panel.chrome, panel.quickbind)
+
   panel:Hide()
   sidebar:Hide()
   if content then content:Hide() end
@@ -665,8 +698,9 @@ end
 -- ---------------------------------------------------------------------------
 -- General page
 --
--- The original panel's contents: edit mode and the position reset. Registered
--- here rather than in core so the window has no special-cased first page.
+-- The original panel's contents: the position reset and the small toggles
+-- that do not warrant a tab of their own. Anchor Mode and Quick Binding live
+-- in the window footer so they stay reachable from every page.
 -- ---------------------------------------------------------------------------
 local function BuildGeneralPage(parent)
   local widgets = {}
@@ -678,29 +712,27 @@ local function BuildGeneralPage(parent)
   })
   table.insert(widgets, header)
 
-  local move = U.CreateButton(parent, {
-    name = "QtUiPlusSettingsMove",
-    text = "Move UI",
-    width = 220,
-    height = 26,
-    onClick = function()
-      -- The window would sit on top of the edit panel and the frames being
-      -- placed, so opening edit mode closes it.
-      Hide()
-      U.UnlockUI()
-    end,
-  })
-  move:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -34)
-  table.insert(widgets, move)
-
   local reset = U.CreateButton(parent, {
     name = "QtUiPlusSettingsReset",
     text = "Reset frame positions",
     width = 220,
     height = 26,
-    onClick = function() U.ResetPositions() end,
+    onClick = function()
+      if type(U.ShowConfirm) ~= "function" then
+        U.ResetPositions()
+        return
+      end
+      U.ShowConfirm({
+        owner = "settings-reset",
+        text = "Reset all frame positions?",
+        detail = "Every moved frame returns to its default place.",
+        acceptText = "Reset",
+        cancelText = "Cancel",
+        onAccept = function() U.ResetPositions() end,
+      })
+    end,
   })
-  reset:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -66)
+  reset:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -34)
   table.insert(widgets, reset)
 
   local hint = U.CreateSettingsLabel(parent, {
@@ -711,43 +743,9 @@ local function BuildGeneralPage(parent)
   })
   if hint then
     U.AnchorSettingsDescription(hint, reset)
-    hint:SetText("Drag frames onto the grid in edit mode. " ..
+    hint:SetText("Anchor Mode (footer) lets you drag frames onto the grid. " ..
                  "Hold Shift while dropping for free placement.")
     table.insert(widgets, hint)
-  end
-
-  -- Quick binding (modules/quickbind.lua) is a mode, like edit mode above, so
-  -- it lives beside it rather than only on the ActionBars page. Registered
-  -- lazily, same as everything else this window links out to: if the module
-  -- failed to load, the button still shows and says so instead of vanishing.
-  local quickbind = U.CreateButton(parent, {
-    name = "QtUiPlusSettingsQuickBind",
-    text = "Quick Binding",
-    width = 220,
-    height = 26,
-    onClick = function()
-      Hide()
-      if type(U.OpenQuickBind) == "function" then
-        U.OpenQuickBind()
-      else
-        U.Error("quick binding is not available in this build")
-      end
-    end,
-  })
-  quickbind:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -140)
-  table.insert(widgets, quickbind)
-
-  local quickbindHint = U.CreateSettingsLabel(parent, {
-    size = M.fontSize.small,
-    color = M.color.textDim,
-    inherits = "GameFontNormalSmall",
-    justify = "LEFT",
-  })
-  if quickbindHint then
-    U.AnchorSettingsDescription(quickbindHint, quickbind)
-    quickbindHint:SetText("Hover an action bar slot and press a key to bind it. " ..
-                          "Escape over a slot clears it.")
-    table.insert(widgets, quickbindHint)
   end
 
   -- The micro bar (modules/microbar.lua) has a single setting, so its toggle
@@ -761,7 +759,7 @@ local function BuildGeneralPage(parent)
       if type(U.ApplyMicroBar) == "function" then U.ApplyMicroBar() end
     end,
   })
-  microbar.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -204)
+  microbar.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -100)
   table.insert(widgets, microbar)
 
   local microbarHint = U.CreateSettingsLabel(parent, {
@@ -789,7 +787,7 @@ local function BuildGeneralPage(parent)
       if type(U.ApplyXPBar) == "function" then U.ApplyXPBar() end
     end,
   })
-  reputation.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -260)
+  reputation.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -156)
   table.insert(widgets, reputation)
 
   -- The minimap settings button (modules/minimap.lua) is the normal way to
@@ -804,12 +802,12 @@ local function BuildGeneralPage(parent)
       if type(U.ApplyMinimapButton) == "function" then U.ApplyMinimapButton() end
     end,
   })
-  minimapButton.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -292)
+  minimapButton.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -188)
   table.insert(widgets, minimapButton)
 
   -- Grid pitch for edit mode (core/mover.lua). Lives here rather than on a
-  -- page of its own: it is one slider, and it belongs beside the Move UI button
-  -- that opens the mode it affects.
+  -- page of its own: it is one slider, and it belongs with the Anchor Mode
+  -- button that opens the mode it affects.
   local gridMin, gridMax, gridStep = U.GridSizeLimits()
   local gridSlider = U.CreateSlider(parent, {
     name = "QtUiPlusSettingsGridSize",
@@ -819,7 +817,7 @@ local function BuildGeneralPage(parent)
     value = U.GridSize(),
     onChange = function(value) U.SetGridSize(value) end,
   })
-  gridSlider.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -330)
+  gridSlider.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -226)
   table.insert(widgets, gridSlider)
 
   local padMin, padMax, padStep = 0, 80, 1
@@ -848,7 +846,7 @@ local function BuildGeneralPage(parent)
       end,
     })
     slider.SetPoint("TOPLEFT", parent, "TOPLEFT",
-                    spec.column * 258, -390 - spec.row * 44)
+                    spec.column * 258, -286 - spec.row * 44)
     padControls[spec.edge] = slider
     table.insert(widgets, slider)
   end
