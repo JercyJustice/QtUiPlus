@@ -403,10 +403,9 @@ end
 
 -- Unit-frame bars: a mild left-to-right fade painted on a full-width child
 -- and clipped to the current value. HORIZONTAL interpolates left→right
--- (wiki Texture SetGradientAlpha). 0.82 at the left / full colour at the
--- right is a soft sweep; the old *0.38 stop plus shrinking the fill made
--- a hard, compressed step.
-local GRADIENT_DIM = 0.82
+-- (wiki Texture SetGradientAlpha). Full colour on the left, 90% on the
+-- right -- light into a slight shade, not into a dark stop.
+local GRADIENT_DIM = 0.90
 
 PaintGradientTexture = function(bar)
   local fill = bar.qtpGradTexture
@@ -417,10 +416,10 @@ PaintGradientTexture = function(bar)
   local a = bar.qtpPaintA or 1
   pcall(fill.SetTexture, fill, M.texture.plain)
   U.SetColor(fill, 1, 1, 1, 1)
-  -- Left is the dimmer stop, right is the bar colour (swapped from 0.7.9).
+  -- Bright at the left, slightly darkened at the right.
   return pcall(fill.SetGradientAlpha, fill, "HORIZONTAL",
-               r * GRADIENT_DIM, g * GRADIENT_DIM, b * GRADIENT_DIM, a,
-               r, g, b, a)
+               r, g, b, a,
+               r * GRADIENT_DIM, g * GRADIENT_DIM, b * GRADIENT_DIM, a)
 end
 
 EnsureBarShine = function(bar, shown)
@@ -441,14 +440,11 @@ EnsureBarShine = function(bar, shown)
     shine:ClearAllPoints()
     shine:SetAllPoints(host)
   end
-  if not shine.qtpReady then
-    pcall(shine.SetTexture, shine, M.texture.plain)
-    U.SetColor(shine, 1, 1, 1, 1)
-    -- Soft highlight on the bright (right) edge, matching the swapped fill.
-    pcall(shine.SetGradientAlpha, shine, "HORIZONTAL",
-          0, 0, 0, 0, 1, 1, 1, 0.10)
-    shine.qtpReady = true
-  end
+  pcall(shine.SetTexture, shine, M.texture.plain)
+  U.SetColor(shine, 1, 1, 1, 1)
+  -- Soft highlight on the bright (left) edge.
+  pcall(shine.SetGradientAlpha, shine, "HORIZONTAL",
+        1, 1, 1, 0.08, 0, 0, 0, 0)
   pcall(shine.SetAlpha, shine, 1)
   pcall(shine.Show, shine)
 end
@@ -462,7 +458,7 @@ function U.PaintStatusBar(bar, r, g, b, a, gradient)
   a = tonumber(a) or 1
   gradient = gradient and true or false
 
-  local stamp = (gradient and "c2" or "0") .. ":" .. r .. ":" .. g .. ":" .. b .. ":" .. a
+  local stamp = (gradient and "c3" or "0") .. ":" .. r .. ":" .. g .. ":" .. b .. ":" .. a
   if bar.qtpPaintStamp == stamp and bar.qtpGradient == gradient then return end
   bar.qtpPaintStamp = stamp
   bar.qtpPaintR, bar.qtpPaintG, bar.qtpPaintB, bar.qtpPaintA = r, g, b, a
