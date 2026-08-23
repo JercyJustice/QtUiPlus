@@ -1046,54 +1046,28 @@ local function BuildFrame(spec, parent)
 end
 
 -- ---------------------------------------------------------------------------
--- Rogue combo points
+-- Stock combo point display
 --
--- query_compat.py has no record at all for GetComboPoints or any combo-point
--- event (api/events/behavior/knowledge all came back empty), so this follows
--- UnrealPfUI's demonstrated shape (modules/combopoints.lua) as WORKING_SOURCE
--- evidence, not runtime verification: GetComboPoints("target") plus
--- UNIT_COMBO_POINTS / PLAYER_COMBO_POINTS / PLAYER_TARGET_CHANGED /
--- PLAYER_ENTERING_WORLD. Rogue only, per request -- the pfUI reference also
--- drives a druid combo variant and a separate paladin "reck" tracker that
--- QtUiPlus does not reproduce here.
+-- The display itself now lives in modules/combopoints.lua: a standalone,
+-- movable bar with its own size/spacing/background settings. What stays here
+-- is only the suppression of the client's own ComboFrame, because it belongs
+-- with the rest of this module's stock-frame teardown.
 --
--- Flat modern design, not pfUI's red/yellow/green tiered pips: five equal
--- segments in a single hue (rogue class colour when filled, the same empty
--- bar tone the health/power bars use when not), overlaid on a raised child
--- layer across the top of the player health bar so the frame's own geometry
--- and mover position are untouched.
+-- Suppression is unconditional now. It used to be rogue-only, which is why a
+-- druid in cat form saw the native gems drawing at TargetFrame's stock
+-- top-left position: the target family is suppressed visual-only (alpha 0, no
+-- Hide) and this client does not propagate parent alpha, so the gems stayed
+-- fully drawn over an otherwise invisible frame. Every class that can have
+-- combo points is now drawn by QtUiPlus, so nothing needs the stock display.
+--
+-- ComboFrame plus ComboPoint1..5 and their Highlight/Shine regions -- all
+-- sixteen names are in this client's global table (2026-08-16 probe capture).
+-- Registered in the default "static" group: hide, neutralise Show, drop native
+-- events, which is what UnrealPfUI's modules/combopoints.lua does on this same
+-- client (WORKING_SOURCE, not runtime verified).
 -- ---------------------------------------------------------------------------
 local COMBO_MAX = 5
-local COMBO_GAP = 2
-local COMBO_HEIGHT = 4
--- Brighter than M.color.healthBg (the bar's own empty tone) on purpose: an
--- empty pip needs to read as a visible slot against the near-black health
--- bar, not blend into it.
-local COMBO_EMPTY = { 0.24, 0.24, 0.24, 1.00 }
 
-local comboPips = nil
--- Rogues always see the five slots; a druid only has combo points in cat form,
--- so an always-visible empty strip would be noise on their bar for most of the
--- session. The pips sit on a raised child layer, so showing and hiding them
--- shifts no layout.
-local comboAlwaysShown = false
-
--- The stock combo display is its own global family, not a TargetFrame child
--- name, so the suppression list above never touched it: ComboFrame plus
--- ComboPoint1..5 and their Highlight/Shine regions (all sixteen names are in
--- this client's global table -- 2026-08-16 probe capture). The target family is
--- suppressed visual-only, alpha 0 with no Hide, and this client does not
--- propagate parent alpha, so the native gems stayed fully drawn at TargetFrame's
--- stock position on top of an otherwise invisible frame -- visible to any rogue
--- who gained a combo point, next to QtUiPlus's own pips.
---
--- Registered in the default "static" group, i.e. the full teardown: hide,
--- neutralise Show, drop native events. That is what UnrealPfUI's
--- modules/combopoints.lua does on this same client (ComboFrame:Hide() plus
--- ComboFrame:UnregisterAllEvents()) -- WORKING_SOURCE evidence, not runtime
--- verification. Only registered for the class QtUiPlus actually replaces the
--- display for; a druid keeps the native gems rather than losing combo points
--- to a frame that draws nothing for it.
 local function SuppressStockComboFrame()
   local names = { "ComboFrame" }
   local i
@@ -1103,81 +1077,6 @@ local function SuppressStockComboFrame()
     table.insert(names, "ComboPoint" .. i .. "Shine")
   end
   U.SuppressNativeFrame(names)
-end
-
-local function BuildComboPoints(playerFrame)
-  local health = playerFrame and playerFrame.health
-  if not health then return end
-
-  local border = U.BorderSize()
-  local width = playerFrame.spec.width
-  local pipWidth = (width - (COMBO_MAX - 1) * COMBO_GAP) / COMBO_MAX
-
-  -- Same raised-child-layer trick as the targettarget health label: sits above
-  -- the bar fill so the fill's width changes can never cover the pips.
-  local layer = CreateFrame("Frame", nil, health)
-  layer:SetAllPoints(health)
-  local levelOk, level = pcall(health.GetFrameLevel, health)
-  if levelOk and tonumber(level) then
-    pcall(layer.SetFrameLevel, layer, level + 10)
-  end
-
-  comboPips = {}
-  local i
-  for i = 1, COMBO_MAX do
-    local pip = CreateFrame("Frame", nil, layer)
-    pip:SetWidth(pipWidth)
-    pip:SetHeight(COMBO_HEIGHT)
-    pip:SetPoint("TOPLEFT", layer, "TOPLEFT",
-                border + (i - 1) * (pipWidth + COMBO_GAP), -border)
-    U.CreateBackdrop(pip, { border = false, background = COMBO_EMPTY })
-    comboPips[i] = pip
-  end
-end
-
-local function SetComboPoints(count)
-  if not comboPips then return end
-  count = tonumber(count) or 0
-
-  -- Colour the filled pips with the player's own class colour rather than a
-  -- hardcoded rogue one: a druid's points should read as druid.
-  local fill = M.ClassColor(UnitClassToken("player")) or M.class.ROGUE
-  local shown = comboAlwaysShown or count > 0
-
-  local i
-  for i = 1, COMBO_MAX do
-    local pip = comboPips[i]
-    if not shown then
-      pip:Hide()
-    else
-      pip:Show()
-      if i <= count then
-        U.SetBackgroundColor(pip, M.Unpack(fill))
-      else
-        U.SetBackgroundColor(pip, M.Unpack(COMBO_EMPTY))
-      end
-    end
-  end
-end
-
-local function RefreshComboPoints()
-  if not comboPips then return end
-  local get = ResolveApiFn("GetComboPoints")
-  if not get then return end
-  local ok, value = pcall(get, "target")
-  SetComboPoints(ok and value or 0)
-end
-
-local COMBO_EVENTS = {
-  "UNIT_COMBO_POINTS", "PLAYER_COMBO_POINTS",
-  "PLAYER_TARGET_CHANGED", "PLAYER_ENTERING_WORLD",
-}
-
-local function RegisterComboEvents()
-  local i
-  for i = 1, table.getn(COMBO_EVENTS) do
-    U.RegisterEvent(COMBO_EVENTS[i], RefreshComboPoints)
-  end
 end
 
 -- ---------------------------------------------------------------------------
@@ -2224,18 +2123,9 @@ function UF:OnEnable()
 
   RegisterEvents()
 
-  -- Druids get combo points in cat form and were previously left out: the
-  -- stock ComboFrame was never suppressed for them and QtUiPlus drew no pips,
-  -- so a druid saw the native gems at TargetFrame's stock top-left position
-  -- while every other part of that frame was hidden.
-  local comboClass = UnitClassToken("player")
-  if frames.player and (comboClass == "ROGUE" or comboClass == "DRUID") then
-    comboAlwaysShown = (comboClass == "ROGUE")
-    SuppressStockComboFrame()
-    BuildComboPoints(frames.player)
-    RegisterComboEvents()
-    RefreshComboPoints()
-  end
+  -- Every class: modules/combopoints.lua owns the replacement display, so the
+  -- stock one is never wanted regardless of class.
+  SuppressStockComboFrame()
 
   -- Druid only: this is what puts the "Druid Mana" anchor in edit mode for a
   -- druid and leaves every other class's mover list untouched.
