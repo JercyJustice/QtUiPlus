@@ -204,11 +204,10 @@ end
 -- Assigned below PaintStatusBar. Called from UpdateStatusBarFill so a
 -- zero-width fill also drops the shine (Hide() alone is not enough here).
 local EnsureBarShine
+local EnsureGradientClip
+local PaintGradientTexture
 
-local function UpdateStatusBarFill(bar)
-  local fill = bar.qtpFillTexture
-  if not fill then return end
-
+local function BarExtent(bar)
   local size
   if bar.qtpVertical then
     size = tonumber(bar.qtpLayoutHeight) or tonumber(bar:GetHeight())
@@ -222,17 +221,84 @@ local function UpdateStatusBarFill(bar)
   if range > 0 and size > 0 then
     extent = size / range * ((bar.qtpValue or 0) - (bar.qtpMin or 0))
   end
-
   if extent < 0 then extent = 0 end
   if extent > size then extent = size end
+  return size, extent
+end
 
-  -- A zero-extent texture is hidden rather than left at zero size: a texture
-  -- asked for no width is exactly the case that rendered as a stray block.
+-- Gradient is painted across the *full* bar width. A ScrollFrame clips that
+-- child to the current value so losing HP cuts the right edge instead of
+-- squeezing the whole fade into the remaining fill (wiki ScrollFrame).
+EnsureGradientClip = function(bar)
+  if bar.qtpClip then return end
+  local clip = CreateFrame("ScrollFrame", nil, bar)
+  pcall(clip.EnableMouse, clip, false)
+  local holder = CreateFrame("Frame", nil, clip)
+  pcall(clip.SetScrollChild, clip, holder)
+  pcall(holder.EnableMouse, holder, false)
+
+  local grad = holder:CreateTexture(nil, "ARTWORK")
+  grad:SetAllPoints(holder)
+  local shine = holder:CreateTexture(nil, "OVERLAY")
+  pcall(shine.SetBlendMode, shine, "ADD")
+  shine:SetAllPoints(holder)
+
+  bar.qtpClip = clip
+  bar.qtpClipChild = holder
+  bar.qtpGradTexture = grad
+  bar.qtpShine = shine
+end
+
+local function UpdateStatusBarFill(bar)
+  local fill = bar.qtpFillTexture
+  if not fill then return end
+
+  local size, extent = BarExtent(bar)
+  local height
+  if bar.qtpVertical then
+    height = tonumber(bar.qtpLayoutWidth) or tonumber(bar:GetWidth()) or 0
+  else
+    height = tonumber(bar.qtpLayoutHeight) or tonumber(bar:GetHeight()) or 0
+  end
+
   if extent <= 0 then
     fill:Hide()
+    if bar.qtpClip then pcall(bar.qtpClip.Hide, bar.qtpClip) end
     if EnsureBarShine then EnsureBarShine(bar, false) end
     return
   end
+
+  if bar.qtpGradient then
+    EnsureGradientClip(bar)
+    local clip = bar.qtpClip
+    local holder = bar.qtpClipChild
+    fill:Hide()
+    holder:SetWidth(size)
+    holder:SetHeight(height)
+    clip:ClearAllPoints()
+    if bar.qtpVertical then
+      clip:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 0, 0)
+      clip:SetWidth(height)
+      clip:SetHeight(extent)
+    else
+      clip:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+      clip:SetWidth(extent)
+      clip:SetHeight(height)
+    end
+    pcall(clip.SetHorizontalScroll, clip, 0)
+    pcall(clip.SetVerticalScroll, clip, 0)
+    pcall(clip.UpdateScrollChildRect, clip)
+    pcall(clip.Show, clip)
+    if bar.qtpGradW ~= size or bar.qtpGradH ~= height then
+      bar.qtpGradW = size
+      bar.qtpGradH = height
+      if PaintGradientTexture then PaintGradientTexture(bar) end
+    end
+    if EnsureBarShine then EnsureBarShine(bar, true) end
+    return
+  end
+
+  if bar.qtpClip then pcall(bar.qtpClip.Hide, bar.qtpClip) end
 
   fill:ClearAllPoints()
   if bar.qtpVertical then
@@ -243,9 +309,7 @@ local function UpdateStatusBarFill(bar)
     fill:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -(size - extent), 0)
   end
   fill:Show()
-  if bar.qtpGradient and EnsureBarShine then
-    EnsureBarShine(bar, true)
-  end
+  if EnsureBarShine then EnsureBarShine(bar, false) end
 end
 
 local function BarSetMinMaxValues(self, minimum, maximum)
@@ -337,13 +401,28 @@ function U.SizeStatusBar(bar, width, height)
   if bar.SetValue then pcall(bar.SetValue, bar, value) end
 end
 
--- Unit-frame bars: a left-to-right dark-to-light fill plus an additive shine.
--- Emberveil Texture has no SetGradient (wiki Texture page); SetGradientAlpha
--- is the documented substitute. HORIZONTAL interpolates left→right and
--- replaces a bound image with a coloured fill. SetVertexColor on a Texture
--- writes the texture colour (LayeredRegion wiki), so a leftover tint after
--- CreateStatusBar would flatten the gradient back to a solid — reset to white
--- first.
+-- Unit-frame bars: a mild left-to-right fade painted on a full-width child
+-- and clipped to the current value. HORIZONTAL interpolates left→right
+-- (wiki Texture SetGradientAlpha). 0.82 at the left / full colour at the
+-- right is a soft sweep; the old *0.38 stop plus shrinking the fill made
+-- a hard, compressed step.
+local GRADIENT_DIM = 0.82
+
+PaintGradientTexture = function(bar)
+  local fill = bar.qtpGradTexture
+  if not fill then return false end
+  local r = bar.qtpPaintR or 1
+  local g = bar.qtpPaintG or 1
+  local b = bar.qtpPaintB or 1
+  local a = bar.qtpPaintA or 1
+  pcall(fill.SetTexture, fill, M.texture.plain)
+  U.SetColor(fill, 1, 1, 1, 1)
+  -- Left is the dimmer stop, right is the bar colour (swapped from 0.7.9).
+  return pcall(fill.SetGradientAlpha, fill, "HORIZONTAL",
+               r * GRADIENT_DIM, g * GRADIENT_DIM, b * GRADIENT_DIM, a,
+               r, g, b, a)
+end
+
 EnsureBarShine = function(bar, shown)
   local shine = bar.qtpShine
   if not shown then
@@ -356,21 +435,18 @@ EnsureBarShine = function(bar, shown)
     return
   end
 
-  if not shine then
-    shine = bar:CreateTexture(nil, "OVERLAY")
-    pcall(shine.SetBlendMode, shine, "ADD")
-    bar.qtpShine = shine
+  if not shine then return end
+  local host = bar.qtpClipChild or bar.qtpGradTexture
+  if host then
+    shine:ClearAllPoints()
+    shine:SetAllPoints(host)
   end
-
-  local fill = bar.qtpFillTexture
-  shine:ClearAllPoints()
-  if fill then shine:SetAllPoints(fill) else shine:SetAllPoints(bar) end
-
   if not shine.qtpReady then
     pcall(shine.SetTexture, shine, M.texture.plain)
     U.SetColor(shine, 1, 1, 1, 1)
-    -- HORIZONTAL is left→right. White highlight at the left, fade to nothing.
-    pcall(shine.SetGradientAlpha, shine, "HORIZONTAL", 1, 1, 1, 0.28, 0, 0, 0, 0)
+    -- Soft highlight on the bright (right) edge, matching the swapped fill.
+    pcall(shine.SetGradientAlpha, shine, "HORIZONTAL",
+          0, 0, 0, 0, 1, 1, 1, 0.10)
     shine.qtpReady = true
   end
   pcall(shine.SetAlpha, shine, 1)
@@ -386,29 +462,27 @@ function U.PaintStatusBar(bar, r, g, b, a, gradient)
   a = tonumber(a) or 1
   gradient = gradient and true or false
 
-  local stamp = (gradient and "1" or "0") .. ":" .. r .. ":" .. g .. ":" .. b .. ":" .. a
+  local stamp = (gradient and "c2" or "0") .. ":" .. r .. ":" .. g .. ":" .. b .. ":" .. a
   if bar.qtpPaintStamp == stamp and bar.qtpGradient == gradient then return end
   bar.qtpPaintStamp = stamp
+  bar.qtpPaintR, bar.qtpPaintG, bar.qtpPaintB, bar.qtpPaintA = r, g, b, a
   bar.qtpGradient = gradient
+  bar.qtpGradW, bar.qtpGradH = nil, nil
 
-  local painted = false
   if gradient then
-    -- Re-bind the fill so a previous solid tint cannot stick, then paint the
-    -- gradient. Bright at the left, 38% of the same hue at the right.
-    pcall(fill.SetTexture, fill, M.texture.plain)
-    U.SetColor(fill, 1, 1, 1, 1)
-    painted = pcall(fill.SetGradientAlpha, fill, "HORIZONTAL",
-                    r, g, b, a, r * 0.38, g * 0.38, b * 0.38, a)
+    EnsureGradientClip(bar)
+    if PaintGradientTexture(bar) then
+      UpdateStatusBarFill(bar)
+      return
+    end
+    bar.qtpGradient = false
   end
 
-  if painted then
-    EnsureBarShine(bar, true)
-  else
-    bar.qtpGradient = false
-    pcall(fill.SetTexture, fill, M.texture.plain)
-    U.SetColor(fill, r, g, b, a)
-    EnsureBarShine(bar, false)
-  end
+  if bar.qtpClip then pcall(bar.qtpClip.Hide, bar.qtpClip) end
+  pcall(fill.SetTexture, fill, M.texture.plain)
+  U.SetColor(fill, r, g, b, a)
+  EnsureBarShine(bar, false)
+  UpdateStatusBarFill(bar)
 end
 
 function U.SetStatusBarColor(bar, r, g, b, a)
