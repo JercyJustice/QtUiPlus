@@ -2227,8 +2227,9 @@ end
 -- ---------------------------------------------------------------------------
 -- Mouse
 --
--- No compact-DB record covers TargetUnit or GameTooltip:SetUnit, so both follow
--- UnrealPfUI's call shapes (WORKING_SOURCE) and are pcall'd.
+-- Pending spells: wiki Spell#spellcantargetunit (1/0) and Spell#spelltargetunit
+-- (Protected). QtUI still aims from the click; pcall from OnMouseUp/OnClick.
+-- TargetUnit and GameTooltip:SetUnit follow UnrealPfUI (WORKING_SOURCE).
 --
 -- Right-click opens the same native unit popup menu the stock frames use.
 -- query_compat.py has no record at all for ToggleDropDownMenu, any *DropDown
@@ -2283,12 +2284,92 @@ local function ResolveClickButton(a, b)
   return U.G("arg1")
 end
 
-local function EnableMouse(frame)
-  pcall(frame.EnableMouse, frame, true)
-  pcall(frame.RegisterForClicks, frame, "LeftButtonUp", "RightButtonUp")
+local function Truthy(value)
+  return value == true or value == 1 or value == "1"
+end
 
-  frame:SetScript("OnClick", function(a, b)
+-- While a friendly spell is waiting for a target (the cast cursor), click
+-- the unit frame to aim it -- QtUI UsePendingActionOnUnit.
+-- SpellCanTargetUnit returns 1/0 (wiki Spell page), not true/nil.
+-- SpellTargetUnit is Protected; pcall from this hardware click, same as QtUI.
+local function UsePendingAction(unit, button)
+  if not unit then return nil end
+
+  local pending
+  local can = U.G("SpellCanTargetUnit")
+  if type(can) == "function" then
+    local ok, value = pcall(can, unit)
+    pending = ok and Truthy(value)
+  else
+    local targeting = U.G("SpellIsTargeting")
+    if type(targeting) == "function" then
+      local ok, value = pcall(targeting)
+      pending = ok and Truthy(value)
+    end
+  end
+
+  if pending then
+    if button == "RightButton" then
+      local stop = U.G("SpellStopTargeting")
+      if type(stop) == "function" then pcall(stop) end
+      return true
+    end
+    local aim = U.G("SpellTargetUnit")
+    if type(aim) == "function" then pcall(aim, unit) end
+    return true
+  end
+
+  local hasItem = U.G("CursorHasItem")
+  if type(hasItem) == "function" then
+    local ok, value = pcall(hasItem)
+    if ok and value == true then
+      local drop = U.G("DropItemOnUnit")
+      if type(drop) == "function" then pcall(drop, unit) end
+      return true
+    end
+  end
+  return nil
+end
+
+local function ShowFrameTooltip(owner, unit)
+  local tooltip = U.G("GameTooltip")
+  if not tooltip then return end
+  local anchor = U.G("GameTooltip_SetDefaultAnchor")
+  if type(anchor) ~= "function" or not pcall(anchor, tooltip, owner) then
+    pcall(tooltip.SetOwner, tooltip, owner, "ANCHOR_RIGHT")
+  end
+  if pcall(tooltip.SetUnit, tooltip, unit) then
+    pcall(tooltip.Show, tooltip)
+  end
+end
+
+local function HideFrameTooltip()
+  local tooltip = U.G("GameTooltip")
+  if not tooltip then return end
+  if not pcall(tooltip.FadeOut, tooltip) then
+    pcall(tooltip.Hide, tooltip)
+  end
+end
+
+local function BindUnitClicks(click, frame)
+  pcall(click.EnableMouse, click, true)
+  pcall(click.RegisterForClicks, click, "LeftButtonUp", "RightButtonUp")
+
+  -- Pending spells complete on MouseUp (QtUI). OnClick then skips TargetUnit.
+  click:SetScript("OnMouseUp", function(a, b)
     local button = ResolveClickButton(a, b)
+    if UsePendingAction(frame.unit, button) then
+      click.qtpUsedPending = true
+    end
+  end)
+
+  click:SetScript("OnClick", function(a, b)
+    local button = ResolveClickButton(a, b)
+    if click.qtpUsedPending then
+      click.qtpUsedPending = nil
+      return
+    end
+    if UsePendingAction(frame.unit, button) then return end
 
     if button == "RightButton" then
       ShowUnitMenu(frame)
@@ -2299,33 +2380,32 @@ local function EnableMouse(frame)
     if type(target) == "function" then pcall(target, frame.unit) end
   end)
 
-  frame:SetScript("OnEnter", function()
-    local tooltip = U.G("GameTooltip")
-    if not tooltip then return end
-
-    local anchor = U.G("GameTooltip_SetDefaultAnchor")
-    if type(anchor) ~= "function" or not pcall(anchor, tooltip, frame) then
-      pcall(tooltip.SetOwner, tooltip, frame, "ANCHOR_RIGHT")
-    end
-
-    if pcall(tooltip.SetUnit, tooltip, frame.unit) then
-      pcall(tooltip.Show, tooltip)
-    end
+  click:SetScript("OnEnter", function()
+    ShowFrameTooltip(click, frame.unit)
   end)
 
-  frame:SetScript("OnLeave", function()
-    local tooltip = U.G("GameTooltip")
-    if not tooltip then return end
-
-    -- UnrealPfUI's unit-frame OnLeave (api/unitframes.lua) fades rather than
-    -- hides instantly; Hide() here made the tooltip vanish the moment the
-    -- mouse crossed off the frame instead of the eased dismissal Blizzard's
-    -- own tooltip animates elsewhere. Same evidence gap as SetUnit above:
-    -- WORKING_SOURCE, not runtime-verified on this client.
-    if not pcall(tooltip.FadeOut, tooltip) then
-      pcall(tooltip.Hide, tooltip)
-    end
+  click:SetScript("OnLeave", function()
+    HideFrameTooltip()
   end)
+end
+
+local function EnableMouse(frame)
+  pcall(frame.EnableMouse, frame, true)
+  BindUnitClicks(frame, frame)
+
+  -- Cover bars and portrait so a click lands even when those children
+  -- eat mouse input. Same overlay QtUI uses (frame level +5; mover is +10).
+  if not frame.qtpClick then
+    local click = CreateFrame("Button", frame:GetName() and
+                              (frame:GetName() .. "Click") or nil, frame)
+    click:SetAllPoints(frame)
+    local ok, level = pcall(frame.GetFrameLevel, frame)
+    if ok and tonumber(level) then
+      pcall(click.SetFrameLevel, click, tonumber(level) + 5)
+    end
+    frame.qtpClick = click
+  end
+  BindUnitClicks(frame.qtpClick, frame)
 end
 
 -- ---------------------------------------------------------------------------
