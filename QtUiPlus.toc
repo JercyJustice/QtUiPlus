@@ -2,7 +2,7 @@
 ## Title: |cffffffffQt|cff33c0ffUiPlus
 ## Notes: Unreal Azeroth interface. UnrealUI layout with the full QtUI feature set.
 ## Author: JercyJustice
-## Version: 0.7.38
+## Version: 0.7.39
 ## X-License: MIT
 ## X-Credits: Based on UnrealUI by Tom75VN (MIT); features ported from QtUI by JercyJustice
 ## SavedVariables: QtUiPlusDB, QtUiPlusDiagDB
@@ -48,6 +48,7 @@ modules\status.lua
 modules\questlog.lua
 modules\spellbook.lua
 modules\character.lua
+modules\equipflyout.lua
 modules\friends.lua
 modules\merchant.lua
 modules\trainer.lua
