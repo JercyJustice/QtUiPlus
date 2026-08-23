@@ -268,8 +268,9 @@ local STAT_LABEL_W = 64
 -- therefore carries an extra drop on its label alone (see U.CreateSelect's
 -- labelOffsetY option); its box, arrow and the right select are untouched.
 -- Measured off the client, not derived: raise it to drop the text further, set
--- it to 0 if a later client build stops needing it.
-local STAT_LEFT_LABEL_DROP = 3
+-- it to 0 if a later client build stops needing it. Tuned in game at 0 (label
+-- two pixels high) and 3 (label low enough to reach the box's bottom edge).
+local STAT_LEFT_LABEL_DROP = 2
 local STAT_CATS = {
   { key = "base",          label = "Base Stats" },
   { key = "melee",         label = "Melee" },
