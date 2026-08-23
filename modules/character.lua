@@ -452,28 +452,42 @@ local function CollectCategory(key)
   return rows
 end
 
-local function HideNativeAttributeText()
-  local names = {
-    "CharacterStrength", "CharacterAgility", "CharacterStamina",
-    "CharacterIntellect", "CharacterSpirit", "CharacterArmor",
-    "MeleeAttackPower", "MeleeDamage", "MeleeAttackBonus",
-    "RangedAttackPower", "RangedDamage", "RangedAttackBonus",
-  }
-  local i
-  for i = 1, table.getn(names) do
-    local label = G(names[i] .. "Label")
-    local value = G(names[i] .. "Stat") or G(names[i] .. "Value") or G(names[i])
-    if label then
-      pcall(label.Hide, label)
-      pcall(label.SetAlpha, label, 0)
-    end
-    if value and value ~= label then
-      pcall(value.Hide, value)
-      pcall(value.SetAlpha, value, 0)
+-- Vanilla 1.12 names the rows CharacterStatFrame1–5, CharacterArmorFrame,
+-- CharacterDamageFrame, CharacterAttackPowerFrame, CharacterRanged*Frame.
+-- Hide() is not sticky on this client (compat native-frame hide): PaperDoll
+-- update re-Shows them, which is the doubled Strength/Agility/Melee Attack
+-- on top of our dropdowns. Punch Hide + alpha 0 on every refresh.
+local NATIVE_STAT_FRAMES = {
+  "CharacterStatFrame1", "CharacterStatFrame2", "CharacterStatFrame3",
+  "CharacterStatFrame4", "CharacterStatFrame5",
+  "CharacterArmorFrame", "CharacterAttackFrame", "CharacterDamageFrame",
+  "CharacterAttackPowerFrame", "CharacterRangedAttackFrame",
+  "CharacterRangedDamageFrame", "CharacterRangedAttackPowerFrame",
+  "CharacterDefenseFrame",
+  "CharacterStrengthFrame", "CharacterAgilityFrame", "CharacterStaminaFrame",
+  "CharacterIntellectFrame", "CharacterSpiritFrame",
+}
+
+local function PunchNativeStat(object)
+  if not object or object == statOverlay then return end
+  if object.GetName then
+    local ok, name = pcall(object.GetName, object)
+    if ok and type(name) == "string" and string.find(name, "QtUiPlus", 1, true) then
+      return
     end
   end
+  pcall(object.Hide, object)
+  if object.SetAlpha then pcall(object.SetAlpha, object, 0) end
+end
+
+local function HideNativeAttributeText()
+  local i
+  for i = 1, table.getn(NATIVE_STAT_FRAMES) do
+    PunchNativeStat(G(NATIVE_STAT_FRAMES[i]))
+  end
   local host = G("CharacterAttributesFrame")
-  if host and host.GetRegions then
+  if not host then return end
+  if host.GetRegions then
     pcall(function()
       local regions = { host:GetRegions() }
       local r
@@ -481,8 +495,26 @@ local function HideNativeAttributeText()
         local region = regions[r]
         local ok, objectType = pcall(region.GetObjectType, region)
         if ok and objectType == "FontString" then
-          pcall(region.Hide, region)
-          pcall(region.SetAlpha, region, 0)
+          PunchNativeStat(region)
+        end
+      end
+    end)
+  end
+  if host.GetChildren then
+    pcall(function()
+      local kids = { host:GetChildren() }
+      local k
+      for k = 1, table.getn(kids) do
+        local kid = kids[k]
+        if kid and kid ~= statOverlay then
+          PunchNativeStat(kid)
+          if kid.GetRegions then
+            local regs = { kid:GetRegions() }
+            local r
+            for r = 1, table.getn(regs) do
+              PunchNativeStat(regs[r])
+            end
+          end
         end
       end
     end)
@@ -610,6 +642,16 @@ local function BuildStatPanel()
   end)
   U.RegisterEvent("PLAYER_ENTERING_WORLD", RefreshStatPanel)
   U.RegisterEvent("PLAYER_LEVEL_UP", RefreshStatPanel)
+  if type(U.PostHookGlobal) == "function" then
+    U.PostHookGlobal("PaperDollFrame_UpdateStats", HideNativeAttributeText)
+    U.PostHookGlobal("PaperDollFrame_Update", HideNativeAttributeText)
+  end
+  U.RegisterUpdate("character.native-stats", 0.20, function()
+    local paper = G("PaperDollFrame")
+    if not paper or not paper.IsShown then return end
+    local ok, shown = pcall(paper.IsShown, paper)
+    if ok and shown then HideNativeAttributeText() end
+  end)
 end
 
 local function StyleAttributes()
