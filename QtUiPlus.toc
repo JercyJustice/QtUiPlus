@@ -1,0 +1,66 @@
+## Interface: 11200
+## Title: |cffffffffQt|cff33c0ffUiPlus
+## Notes: Unreal Azeroth interface. UnrealUI layout with the full QtUI feature set.
+## Author: JercyJustice
+## Version: 0.1.0
+## X-License: MIT
+## X-Credits: Based on UnrealUI by Tom75VN (MIT); features ported from QtUI by JercyJustice
+## SavedVariables: QtUiPlusDB, QtUiPlusDiagDB
+
+core\init.lua
+core\perf.lua
+core\media.lua
+core\auradata.lua
+core\compat.lua
+core\config.lua
+core\qtcompat.lua
+core\vendorprices.lua
+core\mobhealthdb.lua
+core\style.lua
+core\itemslot.lua
+core\widgets.lua
+core\stockui.lua
+core\dropdown.lua
+core\mover.lua
+core\windowdrag.lua
+core\commands.lua
+
+modules\settings.lua
+modules\gamemenu.lua
+modules\logout.lua
+modules\minimap.lua
+modules\microbar.lua
+modules\xpbar.lua
+modules\chat.lua
+modules\unitframes.lua
+modules\auras.lua
+modules\nameplates.lua
+modules\tooltip.lua
+modules\castbar.lua
+modules\actionbar.lua
+modules\actionbarconfig.lua
+modules\quickbind.lua
+modules\petbar.lua
+modules\stancebar.lua
+modules\bags.lua
+modules\bank.lua
+modules\status.lua
+modules\questlog.lua
+modules\spellbook.lua
+modules\character.lua
+modules\friends.lua
+modules\merchant.lua
+modules\trainer.lua
+modules\mail.lua
+modules\gossip.lua
+modules\quest.lua
+modules\windowmove.lua
+
+modules\autoloot.lua
+modules\autosell.lua
+modules\eqcompare.lua
+modules\mobhealth.lua
+modules\damagemeter.lua
+modules\chatextras.lua
+modules\profiles.lua
+modules\qtsettings.lua

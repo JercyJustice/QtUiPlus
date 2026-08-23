@@ -1,0 +1,101 @@
+<!-- QtUiPlus :: Bindings.xml
+
+     Binding commands for the action pages this client has none of its own for.
+     ACTIONBUTTON follows whichever page bar 1 shows and the four MULTIACTIONBAR
+     commands cover slots 25 to 72 (bars 2-5), which leaves bar 6 (the main
+     bar's page 2, slots 13 to 24) and the class/bonus pages 7 to 10 with no
+     key of their own. Those are the last five bars, sorted after the bindable
+     ones.
+     Declaring them here puts them in the client's real binding table: SetBinding
+     writes them, SaveBindings persists them, and they appear in the stock Key
+     Bindings window under the QtUiPlus headers.
+
+     This is the path UnrealPfUI uses on this same client for the identical case
+     (its Bindings.xml declares PFPAGING and PFSTANCE commands whose bodies call
+     pfActionButton). WORKING_SOURCE, not runtime verified.
+
+     runOnUp matches that working source: the body runs on key release, so a held
+     key cannot repeat the action.
+
+     The client loads this file itself, which is why it is not listed in the
+     .toc, and it loads it only at start-up: a new command needs a full client
+     restart, not a /reload.
+
+     The body is guarded because a binding can fire before the module that
+     installs QtUiPlusActionButton has finished loading.
+
+     Note for future edits: an XML comment may not contain a double hyphen. A
+     malformed comment makes the client reject this entire file, and every bar
+     below silently loses its keys. -->
+<Bindings>
+  <!-- Bar 6 (main bar page 2, slots 13-24) -->
+  <Binding name="QTUIPLUSBAR6BUTTON1" runOnUp="true" header="QTUIPLUSBAR6">if QtUiPlusActionButton then QtUiPlusActionButton(6,1) end</Binding>
+  <Binding name="QTUIPLUSBAR6BUTTON2" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(6,2) end</Binding>
+  <Binding name="QTUIPLUSBAR6BUTTON3" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(6,3) end</Binding>
+  <Binding name="QTUIPLUSBAR6BUTTON4" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(6,4) end</Binding>
+  <Binding name="QTUIPLUSBAR6BUTTON5" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(6,5) end</Binding>
+  <Binding name="QTUIPLUSBAR6BUTTON6" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(6,6) end</Binding>
+  <Binding name="QTUIPLUSBAR6BUTTON7" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(6,7) end</Binding>
+  <Binding name="QTUIPLUSBAR6BUTTON8" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(6,8) end</Binding>
+  <Binding name="QTUIPLUSBAR6BUTTON9" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(6,9) end</Binding>
+  <Binding name="QTUIPLUSBAR6BUTTON10" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(6,10) end</Binding>
+  <Binding name="QTUIPLUSBAR6BUTTON11" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(6,11) end</Binding>
+  <Binding name="QTUIPLUSBAR6BUTTON12" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(6,12) end</Binding>
+
+  <!-- Bar 7 (bonus/stance page 1) -->
+  <Binding name="QTUIPLUSBAR7BUTTON1" runOnUp="true" header="QTUIPLUSBAR7">if QtUiPlusActionButton then QtUiPlusActionButton(7,1) end</Binding>
+  <Binding name="QTUIPLUSBAR7BUTTON2" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(7,2) end</Binding>
+  <Binding name="QTUIPLUSBAR7BUTTON3" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(7,3) end</Binding>
+  <Binding name="QTUIPLUSBAR7BUTTON4" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(7,4) end</Binding>
+  <Binding name="QTUIPLUSBAR7BUTTON5" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(7,5) end</Binding>
+  <Binding name="QTUIPLUSBAR7BUTTON6" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(7,6) end</Binding>
+  <Binding name="QTUIPLUSBAR7BUTTON7" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(7,7) end</Binding>
+  <Binding name="QTUIPLUSBAR7BUTTON8" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(7,8) end</Binding>
+  <Binding name="QTUIPLUSBAR7BUTTON9" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(7,9) end</Binding>
+  <Binding name="QTUIPLUSBAR7BUTTON10" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(7,10) end</Binding>
+  <Binding name="QTUIPLUSBAR7BUTTON11" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(7,11) end</Binding>
+  <Binding name="QTUIPLUSBAR7BUTTON12" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(7,12) end</Binding>
+
+  <!-- Bar 8 (bonus/stance page 2) -->
+  <Binding name="QTUIPLUSBAR8BUTTON1" runOnUp="true" header="QTUIPLUSBAR8">if QtUiPlusActionButton then QtUiPlusActionButton(8,1) end</Binding>
+  <Binding name="QTUIPLUSBAR8BUTTON2" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(8,2) end</Binding>
+  <Binding name="QTUIPLUSBAR8BUTTON3" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(8,3) end</Binding>
+  <Binding name="QTUIPLUSBAR8BUTTON4" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(8,4) end</Binding>
+  <Binding name="QTUIPLUSBAR8BUTTON5" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(8,5) end</Binding>
+  <Binding name="QTUIPLUSBAR8BUTTON6" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(8,6) end</Binding>
+  <Binding name="QTUIPLUSBAR8BUTTON7" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(8,7) end</Binding>
+  <Binding name="QTUIPLUSBAR8BUTTON8" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(8,8) end</Binding>
+  <Binding name="QTUIPLUSBAR8BUTTON9" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(8,9) end</Binding>
+  <Binding name="QTUIPLUSBAR8BUTTON10" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(8,10) end</Binding>
+  <Binding name="QTUIPLUSBAR8BUTTON11" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(8,11) end</Binding>
+  <Binding name="QTUIPLUSBAR8BUTTON12" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(8,12) end</Binding>
+
+  <!-- Bar 9 (bonus/stance page 3) -->
+  <Binding name="QTUIPLUSBAR9BUTTON1" runOnUp="true" header="QTUIPLUSBAR9">if QtUiPlusActionButton then QtUiPlusActionButton(9,1) end</Binding>
+  <Binding name="QTUIPLUSBAR9BUTTON2" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(9,2) end</Binding>
+  <Binding name="QTUIPLUSBAR9BUTTON3" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(9,3) end</Binding>
+  <Binding name="QTUIPLUSBAR9BUTTON4" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(9,4) end</Binding>
+  <Binding name="QTUIPLUSBAR9BUTTON5" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(9,5) end</Binding>
+  <Binding name="QTUIPLUSBAR9BUTTON6" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(9,6) end</Binding>
+  <Binding name="QTUIPLUSBAR9BUTTON7" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(9,7) end</Binding>
+  <Binding name="QTUIPLUSBAR9BUTTON8" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(9,8) end</Binding>
+  <Binding name="QTUIPLUSBAR9BUTTON9" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(9,9) end</Binding>
+  <Binding name="QTUIPLUSBAR9BUTTON10" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(9,10) end</Binding>
+  <Binding name="QTUIPLUSBAR9BUTTON11" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(9,11) end</Binding>
+  <Binding name="QTUIPLUSBAR9BUTTON12" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(9,12) end</Binding>
+
+  <!-- Bar 10 (bonus/stance page 4) -->
+  <Binding name="QTUIPLUSBAR10BUTTON1" runOnUp="true" header="QTUIPLUSBAR10">if QtUiPlusActionButton then QtUiPlusActionButton(10,1) end</Binding>
+  <Binding name="QTUIPLUSBAR10BUTTON2" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(10,2) end</Binding>
+  <Binding name="QTUIPLUSBAR10BUTTON3" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(10,3) end</Binding>
+  <Binding name="QTUIPLUSBAR10BUTTON4" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(10,4) end</Binding>
+  <Binding name="QTUIPLUSBAR10BUTTON5" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(10,5) end</Binding>
+  <Binding name="QTUIPLUSBAR10BUTTON6" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(10,6) end</Binding>
+  <Binding name="QTUIPLUSBAR10BUTTON7" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(10,7) end</Binding>
+  <Binding name="QTUIPLUSBAR10BUTTON8" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(10,8) end</Binding>
+  <Binding name="QTUIPLUSBAR10BUTTON9" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(10,9) end</Binding>
+  <Binding name="QTUIPLUSBAR10BUTTON10" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(10,10) end</Binding>
+  <Binding name="QTUIPLUSBAR10BUTTON11" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(10,11) end</Binding>
+  <Binding name="QTUIPLUSBAR10BUTTON12" runOnUp="true">if QtUiPlusActionButton then QtUiPlusActionButton(10,12) end</Binding>
+
+</Bindings>
