@@ -514,14 +514,20 @@ end
 -- UIParent is a valid cursor owner (ANCHOR_CURSOR ignores the frame and
 -- follows the mouse). Prefer the recorded button so paperdoll IsOwned still
 -- sees Character*Slot.
+--
+-- Do not steal a bag/slot ANCHOR_LEFT/RIGHT onto ANCHOR_CURSOR: the tooltip
+-- then sits under the mouse, the slot OnLeave fires, and GameTooltip:Hide()
+-- eats it in a millisecond (inventory flash).
 local function FollowCursor(tooltip, owner)
   if not tooltip or not tooltip.SetOwner then return end
   local kind = AnchorType(tooltip) or ownedAnchor
   if kind == "ANCHOR_CURSOR" or kind == "ANCHOR_PRESERVE" then return end
+  if kind and KEEP_OWNER_ANCHOR[kind] then return end
   owner = owner or ownedBy or TooltipOwner(tooltip) or UIParent
   RememberOwner(owner, "ANCHOR_CURSOR")
   itemCursor = true
-  pcall(tooltip.SetOwner, tooltip, owner, "ANCHOR_CURSOR")
+  -- Offset so a remaining cursor tooltip is not under the pointer.
+  pcall(tooltip.SetOwner, tooltip, owner, "ANCHOR_CURSOR", 16, 16)
 end
 
 local function HookSetOwner(tooltip)
