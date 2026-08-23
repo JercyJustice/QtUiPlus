@@ -3,8 +3,8 @@
 -- The shared mover system. Modules register the frames they want the user to
 -- be able to place; unlocking shows a drag handle over each one.
 --
--- Shared mover plus the QtUI-style INFO window (coordinates, 1px nudge,
--- frame list). Only intended QtUiPlus elements are ever registered.
+-- Shared mover plus the movebar (coordinates, 1px nudge, frame list).
+-- Only intended QtUiPlus elements are ever registered.
 -- modules/minimap.lua is the one exception that registers a native frame
 -- (MinimapCluster) rather than an QtUiPlus-owned one: the map itself is
 -- still never reskinned or replaced, it is just given a drag handle.
@@ -260,7 +260,16 @@ local function CreateHandle(entry)
   -- error, and the mover handles are exactly what a drag failure is about.
   local handle = CreateFrame("Button", "QtUiPlusMoverHandle" .. handleCount,
                              entry.frame)
-  handle:SetAllPoints(entry.frame)
+  -- A title strip leaves the rest of the frame clickable (nudge buttons on
+  -- the movebar, list rows on the movelist). Everything else still uses the
+  -- proven SetAllPoints overlay.
+  if entry.handleHeight then
+    handle:SetPoint("TOPLEFT", entry.frame, "TOPLEFT", 0, 0)
+    handle:SetPoint("TOPRIGHT", entry.frame, "TOPRIGHT", 0, 0)
+    handle:SetHeight(entry.handleHeight)
+  else
+    handle:SetAllPoints(entry.frame)
+  end
   handle:RegisterForDrag("LeftButton")
 
   -- A Button is mouse-enabled by default; this is belt and braces, and is
@@ -421,15 +430,17 @@ local function CreateGrid()
 end
 
 -- ---------------------------------------------------------------------------
--- INFO panel (QtUI anchor-mode readout)
+-- movebar + movelist (QtUI INFO readout, registered as movers)
 --
 -- Selected frame name + pixel coordinates, 1px nudge (Shift = 10), center,
--- and a list of every registered mover. Not a mover itself; its position is
--- stored under the mover module config.
+-- and a list of every registered mover. Both windows are movers with a title
+-- handle so they can be placed independently; Hide/List only toggles the
+-- movelist, it does not glue it to the movebar.
 -- ---------------------------------------------------------------------------
 local INFO_W, INFO_H = 220, 196
 local LIST_W, LIST_H = 210, 280
 local LIST_ROWS = 36
+local TITLE_HANDLE_H = 20
 
 local function SetButtonCaption(btn, text)
   if btn and btn.label then pcall(btn.label.SetText, btn.label, text) end
@@ -548,8 +559,7 @@ local function CenterSelected()
   if RefreshInfo then RefreshInfo() end
 end
 
-local function PlaceInfoPanel()
-  if not editPanel then return end
+local function DefaultInfoLeftBottom()
   local cfg = MoverCfg()
   local sw, sh = U.UIWidth(), U.UIHeight()
   local left = tonumber(cfg.infoX)
@@ -558,31 +568,20 @@ local function PlaceInfoPanel()
   if not bottom then bottom = sh - INFO_H - 16 end
   if left < 8 then left = 8 end
   if bottom < 8 then bottom = 8 end
-  editPanel:ClearAllPoints()
-  editPanel:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", left, bottom)
-end
-
-local function SaveInfoPos()
-  if not editPanel then return end
-  local left, bottom = FrameLeftBottom(editPanel)
-  if not left or not bottom then return end
-  local cfg = MoverCfg()
-  cfg.infoX = U.Round(left)
-  cfg.infoY = U.Round(bottom)
+  return left, bottom
 end
 
 local function PlaceListPanel()
   if not editPanel or not editPanel.listPanel then return end
   local panel = editPanel.listPanel
+  local entry = movers["movelist"]
   if not editPanel.listOpen then
     panel:Hide()
+    if entry then HideHandle(entry) end
     return
   end
-  panel:ClearAllPoints()
-  panel:SetPoint("TOPLEFT", editPanel, "TOPRIGHT", 4, 0)
-  panel:SetWidth(LIST_W)
-  panel:SetHeight(LIST_H)
   pcall(panel.Show, panel)
+  if entry and unlocked then ShowHandle(entry) end
 end
 
 function RefreshInfo()
@@ -653,7 +652,7 @@ function RefreshMoveList()
       end
       btn:ClearAllPoints()
       btn:SetPoint("TOPLEFT", editPanel.listPanel, "TOPLEFT",
-                   6 + col * 100, -22 - row * 14)
+                   6 + col * 100, -26 - row * 14)
       btn:SetWidth(96)
       btn:SetHeight(13)
       pcall(btn.Show, btn)
@@ -685,16 +684,6 @@ local function CreateEditPanel()
   pcall(editPanel.SetFrameStrata, editPanel, "TOOLTIP")
   pcall(editPanel.SetFrameLevel, editPanel, 250)
   pcall(editPanel.EnableMouse, editPanel, true)
-  pcall(editPanel.SetMovable, editPanel, true)
-  editPanel:RegisterForDrag("LeftButton")
-  editPanel:SetScript("OnDragStart", function()
-    pcall(editPanel.StartMoving, editPanel)
-  end)
-  editPanel:SetScript("OnDragStop", function()
-    pcall(editPanel.StopMovingOrSizing, editPanel)
-    SaveInfoPos()
-    PlaceListPanel()
-  end)
 
   local title = U.CreateLabel(editPanel, {
     size = M.fontSize.normal,
@@ -703,7 +692,8 @@ local function CreateEditPanel()
   })
   if title then
     title:SetPoint("TOPLEFT", editPanel, "TOPLEFT", 10, -8)
-    title:SetText("INFO")
+    title:SetText("movebar")
+    title:Hide()
   end
   editPanel.title = title
 
@@ -827,7 +817,8 @@ local function CreateEditPanel()
   })
   if listTitle then
     listTitle:SetPoint("TOPLEFT", list, "TOPLEFT", 8, -6)
-    listTitle:SetText("Frames")
+    listTitle:SetText("movelist")
+    listTitle:Hide()
   end
   editPanel.listTitle = listTitle
   editPanel.listPanel = list
@@ -849,14 +840,42 @@ local function CreateEditPanel()
   end
   list:Hide()
 
-  PlaceInfoPanel()
+  local infoLeft, infoBottom = DefaultInfoLeftBottom()
+  if not movers["movebar"] then
+    U.RegisterMover("movebar", editPanel, {
+      label = "movebar",
+      handleHeight = TITLE_HANDLE_H,
+      default = {
+        point = "BOTTOMLEFT",
+        relativePoint = "BOTTOMLEFT",
+        x = infoLeft,
+        y = infoBottom,
+      },
+    })
+  end
+  if not movers["movelist"] then
+    U.RegisterMover("movelist", list, {
+      label = "movelist",
+      handleHeight = TITLE_HANDLE_H,
+      visible = function()
+        return editPanel and editPanel.listOpen and true or false
+      end,
+      default = {
+        point = "BOTTOMLEFT",
+        relativePoint = "BOTTOMLEFT",
+        x = infoLeft + INFO_W + 4,
+        y = infoBottom + INFO_H - LIST_H,
+      },
+    })
+  end
+
   editPanel:Hide()
 end
 
 local function ShowPanelParts()
   if not editPanel then return end
   local parts = {
-    editPanel.title, editPanel.body,
+    editPanel.body,
     editPanel.nudgeLeft, editPanel.nudgeRight, editPanel.nudgeUp, editPanel.nudgeDown,
     editPanel.nudgeCenter, editPanel.listToggle, editPanel.save,
   }
@@ -895,7 +914,6 @@ local function ShowEditOverlay()
   if not editPanel then CreateEditPanel() end
 
   grid:Show()
-  PlaceInfoPanel()
   editPanel:Show()
   ShowPanelParts()
   selectedEntry = nil
@@ -1012,6 +1030,7 @@ function U.RegisterMover(id, frame, options)
     label = options.label or id,
     default = options.default,
     visible = options.visible,
+    handleHeight = tonumber(options.handleHeight),
     dragging = false,
     -- Measured drag activity; reported by U.MoverReport.
     enters = 0,
@@ -1077,7 +1096,7 @@ function U.UnlockUI()
     ShowHandle(movers[moverOrder[i]])
   end
 
-  U.Print("Anchor mode. Click a frame, then nudge from the INFO window. " ..
+  U.Print("Anchor mode. Click a frame, then nudge from the movebar. " ..
           "Shift snaps / 10px. Esc saves.")
 end
 
