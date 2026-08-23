@@ -52,7 +52,31 @@ local flyout
 local buttons = {}
 local activeSlot
 local activeInv
+-- Which slot the cursor is on, and whether it is inside the open list. Both are
+-- driven by OnEnter/OnLeave rather than polled: core/commands.lua records that
+-- GetMouseFocus returns <none> for every sample of a hover watch on this
+-- client, so a ticker cannot ask who has the cursor -- it can only be told.
 local hoverSlot
+local hoverName
+local overFlyout
+local hoverLeftAt
+-- Slot and list sit 4 units apart, so crossing between them leaves the cursor
+-- over neither for a tick or two. Hiding inside that window is what a poll
+-- would do; this window is what stops it.
+local HOVER_GRACE = 0.25
+
+local function Now()
+  local fn = U.G("GetTime")
+  if type(fn) ~= "function" then return nil end
+  local ok, value = pcall(fn)
+  if not ok then return nil end
+  return tonumber(value)
+end
+
+local function LeftHover()
+  overFlyout = false
+  hoverLeftAt = Now()
+end
 
 local function AltDown()
   local fn = U.G("IsAltKeyDown")
@@ -180,7 +204,9 @@ local function EnsureFlyout()
     background = { 0.02, 0.02, 0.02, 0.94 },
     border = M.color.border,
   })
+  flyout:SetScript("OnEnter", function() overFlyout = true end)
   flyout:SetScript("OnLeave", function()
+    LeftHover()
     if not AltDown() then HideFlyout() end
   end)
   local i
@@ -197,6 +223,9 @@ local function EnsureFlyout()
     pcall(icon.SetTexCoord, icon, 0.08, 0.92, 0.08, 0.92)
     btn.icon = icon
     btn:SetScript("OnEnter", function()
+      -- A button is inside the list, but entering it fires the frame's OnLeave,
+      -- so the child has to re-assert the flag the parent just cleared.
+      overFlyout = true
       local tip = U.G("GameTooltip")
       if not tip or not btn.bag then return end
       pcall(tip.SetOwner, tip, btn, "ANCHOR_RIGHT")
@@ -325,6 +354,32 @@ local function SlotUnderMouse()
   return nil, nil
 end
 
+-- Is the cursor inside the open list? The OnEnter/OnLeave flag is the answer
+-- this client actually supplies; IsMouseOver and the GetMouseFocus parent walk
+-- are kept below it because they cost nothing and would be the better answer on
+-- a build where they work.
+local function FlyoutHovered()
+  if overFlyout then return true end
+  if flyout and flyout.IsMouseOver then
+    local mOk, over = pcall(flyout.IsMouseOver, flyout)
+    if mOk and over then return true end
+  end
+  local focus = U.G("GetMouseFocus")
+  if type(focus) == "function" and flyout then
+    local fOk, widget = pcall(focus)
+    if fOk and widget then
+      local p = widget
+      local guard = 0
+      while p and guard < 8 do
+        if p == flyout then return true end
+        if p.GetParent then p = p:GetParent() else p = nil end
+        guard = guard + 1
+      end
+    end
+  end
+  return false
+end
+
 local function Tick()
   local paper = U.G("PaperDollFrame")
   if not paper or not paper.IsShown then
@@ -338,33 +393,23 @@ local function Tick()
   end
   if not AltDown() then
     HideFlyout()
-    hoverSlot = nil
     return
   end
-  local slot, name = SlotUnderMouse()
+
+  -- hoverSlot comes from the slot's own OnEnter, so this also opens the list
+  -- when Alt goes down over a slot the cursor was already resting on.
+  local slot, name = hoverSlot, hoverName
+  if not slot or not name then slot, name = SlotUnderMouse() end
   if slot and name then
-    hoverSlot = slot
     if activeSlot ~= slot then F.ShowForSlot(slot, name) end
     return
   end
-  if flyout and flyout.IsMouseOver then
-    local mOk, over = pcall(flyout.IsMouseOver, flyout)
-    if mOk and over then return end
-  end
-  -- Keep the list while the cursor sits on a flyout button (child of flyout).
-  local focus = U.G("GetMouseFocus")
-  if type(focus) == "function" then
-    local fOk, widget = pcall(focus)
-    if fOk and widget and flyout then
-      local p = widget
-      local guard = 0
-      while p and guard < 8 do
-        if p == flyout then return end
-        if p.GetParent then p = p:GetParent() else p = nil end
-        guard = guard + 1
-      end
-    end
-  end
+
+  if FlyoutHovered() then return end
+
+  local now = Now()
+  if hoverLeftAt and now and (now - hoverLeftAt) < HOVER_GRACE then return end
+
   HideFlyout()
 end
 
@@ -382,10 +427,19 @@ function F:OnEnable()
     if slot then
       slot.qtpFlyoutSlot = names[i]
       U.PostHookScript(slot, "OnEnter", function()
+        hoverSlot = slot
+        hoverName = names[i]
+        overFlyout = false
         if AltDown() then F.ShowForSlot(slot, names[i]) end
       end)
       U.PostHookScript(slot, "OnLeave", function()
-        -- Tick decides whether the cursor landed on the flyout.
+        -- Only the slot that is actually being left may clear the hover: the
+        -- client can deliver the old slot's OnLeave after the new one's OnEnter.
+        if hoverSlot == slot then
+          hoverSlot = nil
+          hoverName = nil
+          LeftHover()
+        end
       end)
     end
   end
