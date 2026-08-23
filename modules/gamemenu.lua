@@ -14,13 +14,13 @@ local M = U.media
 
 local G = U.RegisterModule("gamemenu")
 
-local FRAME_WIDTH = 246
-local BUTTON_WIDTH = 180
-local BUTTON_HEIGHT = 26
-local TOP_OFFSET = 34
-local BOTTOM_PADDING = 20
-local SPACING = 4
-local GROUP_SPACING = 18
+local FRAME_WIDTH = 200
+local BUTTON_WIDTH = 156
+local BUTTON_HEIGHT = 22
+local TOP_OFFSET = 26
+local BOTTOM_PADDING = 12
+local SPACING = 2
+local GROUP_SPACING = 8
 
 local styled = false
 local order
@@ -342,12 +342,12 @@ local function BuildChrome(frame)
   RaiseAbove(chrome, frame, 5)
 
   title = U.CreateLabel(chrome, {
-    size = M.fontSize.large,
+    size = M.fontSize.normal,
     color = M.color.accent,
     inherits = "GameFontNormal",
   })
   title:SetText("Options")
-  title:SetPoint("TOP", chrome, "TOP", 0, -10)
+  title:SetPoint("TOP", chrome, "TOP", 0, -7)
 end
 
 -- Stock GameMenuFrame keeps a gold "Main Menu" FontString (often not the
