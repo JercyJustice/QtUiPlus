@@ -995,6 +995,96 @@ local DURATION = {
   ["scaler test"] = 10,
 }
 
+-- Player and party buffs the DBC extract never listed (it is debuff-weighted).
+-- Without these, party-frame icons for Fortitude, blessings, MotW group
+-- versions and similar show no countdown. Keys match tooltip line 1.
+do
+  local extra = {
+    ["Power Word: Fortitude"] = 1800,
+    ["Prayer of Fortitude"] = 3600,
+    ["Power Word: Shield"] = 30,
+    ["Renew"] = 15,
+    ["Divine Spirit"] = 1800,
+    ["Prayer of Spirit"] = 3600,
+    ["Shadow Protection"] = 600,
+    ["Prayer of Shadow Protection"] = 1200,
+    ["Fear Ward"] = 600,
+    ["Inner Fire"] = 1800,
+    ["Gift of the Wild"] = 3600,
+    ["Rejuvenation"] = 12,
+    ["Regrowth"] = 21,
+    ["Thorns"] = 600,
+    ["Arcane Brilliance"] = 3600,
+    ["Frost Armor"] = 1800,
+    ["Ice Armor"] = 1800,
+    ["Mage Armor"] = 1800,
+    ["Dampen Magic"] = 600,
+    ["Amplify Magic"] = 600,
+    ["Blessing of Might"] = 300,
+    ["Blessing of Wisdom"] = 300,
+    ["Blessing of Kings"] = 300,
+    ["Blessing of Salvation"] = 300,
+    ["Blessing of Sanctuary"] = 300,
+    ["Blessing of Light"] = 300,
+    ["Blessing of Protection"] = 10,
+    ["Blessing of Freedom"] = 10,
+    ["Blessing of Sacrifice"] = 30,
+    ["Greater Blessing of Might"] = 900,
+    ["Greater Blessing of Wisdom"] = 900,
+    ["Greater Blessing of Kings"] = 900,
+    ["Greater Blessing of Salvation"] = 900,
+    ["Greater Blessing of Sanctuary"] = 900,
+    ["Greater Blessing of Light"] = 900,
+    ["Righteous Fury"] = 1800,
+    ["Battle Shout"] = 120,
+    ["Commanding Shout"] = 120,
+    ["Trueshot Aura"] = 1800,
+    ["Detect Lesser Invisibility"] = 600,
+    ["Detect Invisibility"] = 600,
+    ["Detect Greater Invisibility"] = 600,
+    ["Unending Breath"] = 600,
+    ["Fire Resistance Aura"] = 1800,
+    ["Frost Resistance Aura"] = 1800,
+    ["Shadow Resistance Aura"] = 1800,
+    ["Devotion Aura"] = 1800,
+    ["Retribution Aura"] = 1800,
+    ["Concentration Aura"] = 1800,
+    ["Sanctity Aura"] = 1800,
+  }
+  local name, seconds
+  for name, seconds in pairs(extra) do
+    if not DURATION[name] then DURATION[name] = seconds end
+  end
+end
+
+-- Language-independent fallback when the tooltip scanner has no name yet.
+-- Matched as a lowercase substring of the icon path. Only distinctive
+-- fragments, so two spells that share an icon family are not collapsed.
+local TEXTURE_DURATION = {
+  ["wordfortitude"] = 1800,
+  ["prayeroffortitude"] = 3600,
+  ["powerwordshield"] = 30,
+  ["holy_renew"] = 15,
+  ["divinespirit"] = 1800,
+  ["prayerofspirit"] = 3600,
+  ["prayerofshadowprotection"] = 1200,
+  ["innerfire"] = 1800,
+  ["giftofthewild"] = 3600,
+  ["magicalsentry"] = 1800,
+  ["arcaneintellect"] = 1800,
+  ["fistofjustice"] = 300,
+  ["greaterblessing"] = 900,
+  ["battleshout"] = 120,
+}
+
+local DURATION_LOWER = {}
+do
+  local name, seconds
+  for name, seconds in pairs(DURATION) do
+    DURATION_LOWER[string.lower(name)] = seconds
+  end
+end
+
 -- ---------------------------------------------------------------------------
 -- Player-dependent adjustments
 --
@@ -1058,11 +1148,25 @@ end
 
 -- Seconds this aura should run for, or nil when the table has no entry --
 -- which is the signal modules/auras.lua uses to draw no timer at all rather
--- than to invent one.
-function U.AuraDuration(name)
-  if type(name) ~= "string" or name == "" then return nil end
+-- than to invent one. `texture` is an optional icon-path fallback for party
+-- frames when the tooltip scanner has not produced a name yet.
+function U.AuraDuration(name, texture)
+  local base
+  if type(name) == "string" and name ~= "" then
+    base = DURATION[name] or DURATION_LOWER[string.lower(name)]
+  end
 
-  local base = DURATION[name]
+  if (not base or base <= 0) and type(texture) == "string" and texture ~= "" then
+    local lower = string.lower(texture)
+    local key, seconds
+    for key, seconds in pairs(TEXTURE_DURATION) do
+      if string.find(lower, key, 1, true) then
+        base = seconds
+        break
+      end
+    end
+  end
+
   if not base or base <= 0 then return nil end
 
   local adjusted = Adjust(name, base)

@@ -447,7 +447,7 @@ end
 -- `timeLeft`, when present, is that client-reported remaining time and takes
 -- over completely: the entry is rewritten from it on every scan, so the number
 -- cannot drift.
-local function TrackAura(bucket, key, count, pass, timeLeft)
+local function TrackAura(bucket, key, count, pass, timeLeft, texture)
   if not bucket or not key then return nil end
 
   local entry = bucket[key]
@@ -476,24 +476,33 @@ local function TrackAura(bucket, key, count, pass, timeLeft)
   end
 
   if not entry then
-    entry = { start = now, duration = U.AuraDuration(key), count = count }
+    entry = { start = now, duration = U.AuraDuration(key, texture), count = count }
     bucket[key] = entry
-  elseif count > entry.count then
-    -- A stack going up is a reapplication. It is the only refresh signal this
-    -- client gives, since neither the aura call nor the tooltip changes when a
-    -- DoT is recast at the same stack size.
-    entry.count = count
-    entry.start = now
-  elseif entry.duration and entry.start + entry.duration <= now then
-    -- Still here after its duration ran out. Either it was recast (the common
-    -- case, and invisible to us) or core/auradata.lua's number is wrong for
-    -- this server. Restarting is right in the first case and self-correcting
-    -- in neither -- so the timer loops rather than freezing at zero, and a
-    -- duration that is wrong shows up as a timer that resets early.
-    entry.start = now
-    entry.count = count
   else
-    entry.count = count
+    -- First scans can miss the tooltip name (and so the duration). Fill it
+    -- in once a later scan or the texture fallback has an answer, rather
+    -- than leaving the icon without a timer for the rest of the aura.
+    if not entry.duration then
+      entry.duration = U.AuraDuration(key, texture)
+      if entry.duration then entry.start = now end
+    end
+    if count > entry.count then
+      -- A stack going up is a reapplication. It is the only refresh signal this
+      -- client gives, since neither the aura call nor the tooltip changes when a
+      -- DoT is recast at the same stack size.
+      entry.count = count
+      entry.start = now
+    elseif entry.duration and entry.start + entry.duration <= now then
+      -- Still here after its duration ran out. Either it was recast (the common
+      -- case, and invisible to us) or core/auradata.lua's number is wrong for
+      -- this server. Restarting is right in the first case and self-correcting
+      -- in neither -- so the timer loops rather than freezing at zero, and a
+      -- duration that is wrong shows up as a timer that resets early.
+      entry.start = now
+      entry.count = count
+    else
+      entry.count = count
+    end
   end
 
   entry.seen = pass
@@ -917,11 +926,18 @@ end
 -- nothing at all.
 local function AuraName(row, index, texture)
   local cached = row.names[index]
-  if cached and cached.texture == texture then return cached.name end
+  -- A nil name is not cached: SetUnitBuff on a party member can come back
+  -- empty on the first poll, and storing that would leave the icon without
+  -- a timer for as long as the texture stayed the same.
+  if cached and cached.texture == texture and cached.name then
+    return cached.name
+  end
 
   statNames = statNames + 1
   local name = ScanName(row.unit, index, row.harmful)
-  row.names[index] = { texture = texture, name = name }
+  if name then
+    row.names[index] = { texture = texture, name = name }
+  end
   return name
 end
 
@@ -1026,8 +1042,9 @@ local function RefreshRow(row, offset)
       -- The tooltip scan exists only to feed the duration table. On the native
       -- path the client already gave a remaining time, so the aura is keyed by
       -- its texture and no tooltip is armed at all.
-      local key = native and texture or AuraName(row, i, texture)
-      local entry = TrackAura(bucket, key, count, pass, timeLeft)
+      local name = (not native) and AuraName(row, i, texture) or nil
+      local key = native and texture or (name or texture)
+      local entry = TrackAura(bucket, key, count, pass, timeLeft, texture)
 
       if row.harmful and not PassesFilter(debuffType) then
         -- Tracked, not drawn.
@@ -1186,7 +1203,9 @@ function U.AuraDebugDump()
           if not native then name = ScanName(row.unit, i, row.harmful) end
 
           local seconds = timeLeft
-          if not seconds and name then seconds = U.AuraDuration(name) end
+          if not seconds then
+            seconds = U.AuraDuration(name, texture)
+          end
 
           U.Print(string.format("  %d %s name=%s stacks=%s type=%s %s=%s",
                                 i, ShortTexture(texture), tostring(name or "-"),
