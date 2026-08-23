@@ -1987,16 +1987,16 @@ local function EnsureFightPicker()
     local btn = CreateFrame("Button", nil, frame)
     btn:EnableMouse(true)
     btn:RegisterForClicks("LeftButtonUp")
-    QtP.PaintSurface(btn)
+    QtP.PaintListRow(btn)
     btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     btn.text:SetPoint("LEFT", btn, "LEFT", 8, 0)
     btn.text:SetJustifyH("LEFT")
     QtP.ApplyBodyFont(btn.text)
     btn:SetScript("OnEnter", function()
-      QtP.PaintHover(this)
+      QtP.HoverListRow(this)
     end)
     btn:SetScript("OnLeave", function()
-      QtP.PaintSurface(this)
+      QtP.PaintListRow(this, this.qtpActive)
     end)
     btn:SetScript("OnClick", function()
       SelectFight(this.fightIndex)
@@ -2006,10 +2006,13 @@ local function EnsureFightPicker()
   frame.prev = CreateFrame("Button", nil, frame)
   frame.prev:EnableMouse(true)
   frame.prev:RegisterForClicks("LeftButtonUp")
+  QtP.PaintSurface(frame.prev)
   frame.prev.text = frame.prev:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   frame.prev.text:SetPoint("CENTER", frame.prev, "CENTER", 0, 0)
   frame.prev.text:SetText("<")
   QtP.ApplyBodyFont(frame.prev.text)
+  frame.prev:SetScript("OnEnter", function() QtP.PaintHover(this) end)
+  frame.prev:SetScript("OnLeave", function() QtP.PaintSurface(this) end)
   frame.prev:SetScript("OnClick", function()
     if fightPage > 1 then
       fightPage = fightPage - 1
@@ -2019,16 +2022,20 @@ local function EnsureFightPicker()
   frame.next = CreateFrame("Button", nil, frame)
   frame.next:EnableMouse(true)
   frame.next:RegisterForClicks("LeftButtonUp")
+  QtP.PaintSurface(frame.next)
   frame.next.text = frame.next:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   frame.next.text:SetPoint("CENTER", frame.next, "CENTER", 0, 0)
   frame.next.text:SetText(">")
   QtP.ApplyBodyFont(frame.next.text)
+  frame.next:SetScript("OnEnter", function() QtP.PaintHover(this) end)
+  frame.next:SetScript("OnLeave", function() QtP.PaintSurface(this) end)
   frame.next:SetScript("OnClick", function()
     fightPage = fightPage + 1
     if QtP.ShowFightPage then QtP.ShowFightPage() end
   end)
   frame.page = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   frame.page:SetJustifyH("CENTER")
+  QtP.ApplyMutedFont(frame.page)
   if UISpecialFrames then table.insert(UISpecialFrames, "QtPMeterFights") end
   frame:SetScript("OnHide", HideFightMenu)
   fightPicker = frame
@@ -2053,26 +2060,30 @@ local function ShowFightPage()
   local pagerH = 0
   if showPager then pagerH = 24 end
   local width = FIGHT_W
-  local height = TITLE_H + 12 + visible * FIGHT_ROW + pagerH + 8
-  LayoutCenterPanel(frame, width, height, "Fights", "Select a fight.")
+  local height = TITLE_H + 6 + visible * FIGHT_ROW + pagerH + 8
+  LayoutCenterPanel(frame, width, height, "Fights", "")
   local i
   for i = 1, FIGHTS_PER_PAGE do
     local btn = frame.rows[i]
     local spec = rows[first + i - 1]
     if spec and i <= visible then
-      local y = TITLE_H + 8 + (i - 1) * FIGHT_ROW
-      PlaceBox(btn, frame, 10, height - y - FIGHT_ROW + 2, width - 20, FIGHT_ROW - 3)
+      local y = TITLE_H + 4 + (i - 1) * FIGHT_ROW
+      PlaceBox(btn, frame, 8, height - y - FIGHT_ROW + 2, width - 16, FIGHT_ROW - 2)
       btn.fightIndex = spec.index
       local active = (viewing == spec.index) or (not viewing and not spec.index)
+      btn.qtpActive = active and true or nil
+      btn.text:SetText(spec.label)
       if active then
-        btn.text:SetText("|cffffd24d" .. spec.label .. "|r")
+        QtP.ApplyTitleFont(btn.text)
       else
-        btn.text:SetText(spec.label)
+        QtP.ApplyBodyFont(btn.text)
       end
+      QtP.PaintListRow(btn, active)
       if btn.Show then pcall(btn.Show, btn) end
       if btn.EnableMouse then btn:EnableMouse(true) end
     else
       btn.fightIndex = nil
+      btn.qtpActive = nil
       btn:ClearAllPoints()
       btn:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -4000, 4000)
       if btn.EnableMouse then btn:EnableMouse(false) end

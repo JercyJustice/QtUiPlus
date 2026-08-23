@@ -239,6 +239,39 @@ function QtP.PaintHover(frame)
   Paint(frame, M.color.accentFill, M.color.accent)
 end
 
+-- Settings-sidebar row: no outline, accent fill when selected, a faint lift
+-- on hover. Ported lists that still paint boxed QtUI rows go through here.
+local function HideEdges(frame)
+  local edges = frame and frame.qtpEdges
+  if not edges then return end
+  local i
+  for i = 1, table.getn(edges) do
+    pcall(edges[i].Hide, edges[i])
+  end
+end
+
+function QtP.PaintListRow(frame, selected)
+  if not frame then return end
+  if type(U.CreateBackdrop) == "function" then
+    if selected then
+      U.CreateBackdrop(frame, { background = M.color.accentFill, border = false })
+    else
+      U.CreateBackdrop(frame, { background = { 0, 0, 0, 0 }, border = false })
+    end
+    HideEdges(frame)
+    return
+  end
+  Paint(frame, selected and M.color.accentFill or M.color.backgroundRaised,
+        M.color.border)
+end
+
+function QtP.HoverListRow(frame)
+  if not frame or frame.qtpActive then return end
+  if type(U.SetBackgroundColor) == "function" then
+    U.SetBackgroundColor(frame, 1, 1, 1, 0.07)
+  end
+end
+
 -- Fully transparent, for the "hide meter background" option.
 function QtP.PaintClear(frame)
   if type(U.SetBackdropShown) == "function" then
