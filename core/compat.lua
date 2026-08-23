@@ -710,6 +710,38 @@ local function PunchTargetVisuals()
   end
 end
 
+-- The full Hide/NeutraliseShow recipe cannot run until the client has settled
+-- (applying it at load poisons later target-change frames). Until then the
+-- stock Player/Target/MainMenuBar still sit on screen. This short list is
+-- only Hide + alpha 0, no Show() replacement, re-applied every batch tick so
+-- a native re-show during login cannot last more than one frame.
+local COSMETIC_EARLY = {
+  "PlayerFrame", "PlayerPortrait", "PlayerFrameHealthBar", "PlayerFrameManaBar",
+  "PlayerName", "PlayerLevelText", "PlayerFrameHealthBarText", "PlayerFrameManaBarText",
+  "TargetFrame", "TargetPortrait", "TargetName", "TargetLevelText",
+  "TargetFrameHealthBar", "TargetFrameManaBar", "TargetHealthBar", "TargetManaBar",
+  "PetFrame", "ComboFrame", "TargetofTargetFrame",
+  "PartyMemberFrame1", "PartyMemberFrame2", "PartyMemberFrame3", "PartyMemberFrame4",
+  "MainMenuBar", "MainMenuBarArtFrame", "MainMenuExpBar", "ExhaustionTick",
+  "ReputationWatchBar", "MainMenuBarMaxLevelBar",
+  "BonusActionBarFrame", "ShapeshiftBarFrame", "PetActionBarFrame",
+  "MultiBarBottomLeft", "MultiBarBottomRight", "MultiBarRight", "MultiBarLeft",
+  "CastingBarFrame",
+}
+
+local function PunchCosmeticEarly()
+  if U.db and U.db.noSuppress then return end
+  local i
+  for i = 1, table.getn(COSMETIC_EARLY) do
+    local object = ResolveNativeObject(COSMETIC_EARLY[i])
+    if object then
+      pcall(ZeroAlpha, object)
+      pcall(HideObject, object)
+    end
+  end
+  PunchTargetVisuals()
+end
+
 local function SweepNames(names)
   if not names then return end
   local i
@@ -745,6 +777,10 @@ end
 -- but no render tick inherits the whole scan.
 local function ApplyNativeSuppressionBatch()
   if U.PerfDisabled and U.PerfDisabled("sweep") then return end
+  if U.db and U.db.noSuppress then return end
+  -- Cover the settle window: Hide/alpha the obvious stock chrome every tick
+  -- until the full recipe is allowed. Does not NeutraliseShow.
+  if not settled then PunchCosmeticEarly() end
   if SuppressLevel() <= 0 then return end
 
   -- PLAYER_TARGET_CHANGED can precede the native renderer's final write of
@@ -894,7 +930,10 @@ function U.SuppressNativeFrame(names, group)
       -- At load level 1 the bounded batch is deliberately the only start-up
       -- writer. A full event sweep here would put all ~1275 Hide() calls back
       -- into one frame and defeat the progressive start-up path.
-      if not settled then return end
+      if not settled then
+        PunchCosmeticEarly()
+        return
+      end
       ApplyNativeSuppression()
     end)
 
@@ -954,6 +993,9 @@ function U.SuppressNativeFrame(names, group)
     end)
     U.RegisterUpdate("compat.native-suppression", 0.05,
                      ApplyNativeSuppressionBatch)
+    if type(U.DeferOnce) == "function" then
+      U.DeferOnce("compat.cosmetic-early", PunchCosmeticEarly)
+    end
 
     -- Waits for the client to actually be idle rather than for a guessed
     -- number of seconds. A fixed 2s delay measurably was not enough, and the
@@ -967,6 +1009,7 @@ function U.SuppressNativeFrame(names, group)
     local settleStart, settleLast, quiet = nil, nil, 0
 
     U.RegisterUpdate("compat.suppression-settle", 0, function()
+      PunchCosmeticEarly()
       local now
       local ok, value = pcall(GetTime)
       if ok and type(value) == "number" then now = value end
