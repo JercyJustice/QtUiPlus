@@ -201,6 +201,10 @@ end
 --
 -- knowledge.json / statusbar.native_widget_fill_not_laid_out.
 -- ---------------------------------------------------------------------------
+-- Assigned below PaintStatusBar. Called from UpdateStatusBarFill so a
+-- zero-width fill also drops the shine (Hide() alone is not enough here).
+local EnsureBarShine
+
 local function UpdateStatusBarFill(bar)
   local fill = bar.qtpFillTexture
   if not fill then return end
@@ -226,6 +230,7 @@ local function UpdateStatusBarFill(bar)
   -- asked for no width is exactly the case that rendered as a stray block.
   if extent <= 0 then
     fill:Hide()
+    if EnsureBarShine then EnsureBarShine(bar, false) end
     return
   end
 
@@ -238,6 +243,9 @@ local function UpdateStatusBarFill(bar)
     fill:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -(size - extent), 0)
   end
   fill:Show()
+  if bar.qtpGradient and EnsureBarShine then
+    EnsureBarShine(bar, true)
+  end
 end
 
 local function BarSetMinMaxValues(self, minimum, maximum)
@@ -303,9 +311,81 @@ function U.CreateStatusBar(parent, options)
   return bar
 end
 
-function U.SetStatusBarColor(bar, r, g, b, a)
+-- QtUI PaintStatusBar: a vertical dark-to-light fill plus an additive shine.
+-- Emberveil Texture has no SetGradient (wiki Texture page); SetGradientAlpha
+-- is the documented substitute. VERTICAL interpolates top→bottom and replaces
+-- a bound image with a coloured fill. SetVertexColor on a Texture writes the
+-- texture colour (LayeredRegion wiki), so a leftover tint after CreateStatusBar
+-- would flatten the gradient back to a solid — reset to white first.
+EnsureBarShine = function(bar, shown)
+  local shine = bar.qtpShine
+  if not shown then
+    if shine then
+      pcall(shine.SetTexture, shine, "")
+      pcall(shine.SetAlpha, shine, 0)
+      pcall(shine.Hide, shine)
+      shine.qtpReady = nil
+    end
+    return
+  end
+
+  if not shine then
+    shine = bar:CreateTexture(nil, "OVERLAY")
+    pcall(shine.SetBlendMode, shine, "ADD")
+    bar.qtpShine = shine
+  end
+
+  local fill = bar.qtpFillTexture
+  shine:ClearAllPoints()
+  if fill then shine:SetAllPoints(fill) else shine:SetAllPoints(bar) end
+
+  if not shine.qtpReady then
+    pcall(shine.SetTexture, shine, M.texture.plain)
+    U.SetColor(shine, 1, 1, 1, 1)
+    -- VERTICAL is top→bottom. White highlight at the top, fade to nothing.
+    pcall(shine.SetGradientAlpha, shine, "VERTICAL", 1, 1, 1, 0.28, 0, 0, 0, 0)
+    shine.qtpReady = true
+  end
+  pcall(shine.SetAlpha, shine, 1)
+  pcall(shine.Show, shine)
+end
+
+function U.PaintStatusBar(bar, r, g, b, a, gradient)
   if not bar or not bar.qtpFillTexture then return end
-  U.SetColor(bar.qtpFillTexture, r, g, b, a)
+  local fill = bar.qtpFillTexture
+  r = tonumber(r) or 1
+  g = tonumber(g) or 1
+  b = tonumber(b) or 1
+  a = tonumber(a) or 1
+  gradient = gradient and true or false
+
+  local stamp = (gradient and "1" or "0") .. ":" .. r .. ":" .. g .. ":" .. b .. ":" .. a
+  if bar.qtpPaintStamp == stamp and bar.qtpGradient == gradient then return end
+  bar.qtpPaintStamp = stamp
+  bar.qtpGradient = gradient
+
+  local painted = false
+  if gradient then
+    -- Re-bind the fill so a previous solid tint cannot stick, then paint the
+    -- gradient. Bright at the top, 38% of the same hue at the bottom (QtUI).
+    pcall(fill.SetTexture, fill, M.texture.plain)
+    U.SetColor(fill, 1, 1, 1, 1)
+    painted = pcall(fill.SetGradientAlpha, fill, "VERTICAL",
+                    r, g, b, a, r * 0.38, g * 0.38, b * 0.38, a)
+  end
+
+  if painted then
+    EnsureBarShine(bar, true)
+  else
+    bar.qtpGradient = false
+    pcall(fill.SetTexture, fill, M.texture.plain)
+    U.SetColor(fill, r, g, b, a)
+    EnsureBarShine(bar, false)
+  end
+end
+
+function U.SetStatusBarColor(bar, r, g, b, a)
+  U.PaintStatusBar(bar, r, g, b, a, bar and bar.qtpGradient)
 end
 
 -- ---------------------------------------------------------------------------

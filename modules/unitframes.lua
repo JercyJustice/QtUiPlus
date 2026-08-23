@@ -1513,7 +1513,7 @@ local COLOR_DEFAULTS = {
   -- covers everything the player does not control.
   classColorPlayers = false,
   reactionColors    = false,
-  -- QtUI "Gradient bars": fade health from red/yellow into the base colour.
+  -- QtUI "Gradient bars": vertical dark-to-light fill of the bar colour.
   gradientBars      = true,
 }
 
@@ -1596,37 +1596,36 @@ local function HealthColorFor(frame)
   return HealthBaseColor()
 end
 
--- A checked custom colour always wins over the health gradient. With it off,
--- keep the default full-health colour and fade into the pastel gradient.
+-- QtUI "Gradient bars": a vertical dark-to-light fill of the bar's own colour
+-- plus an additive shine. Not a red/yellow/green HP mix -- that never showed
+-- at full health (perc >= 1) and is not what the setting paints in QtUI.
 local function ApplyHealthColor(frame)
-  local perc = frame.data.healthPercent
   local cfg = ColorConfig()
-  local cr, cg, cb = HealthColorFor(frame)
-
-  local r, g, b
-  if cfg.customColors or cfg.gradientBars == false or perc >= 1 then
-    r, g, b = cr, cg, cb
-  else
-    r, g, b = PastelBar(Gradient(perc))
-    r = cr * perc + r * (1 - perc)
-    g = cg * perc + g * (1 - perc)
-    b = cb * perc + b * (1 - perc)
-  end
+  local r, g, b = HealthColorFor(frame)
+  local gradient = cfg.gradientBars ~= false
 
   if frame.healthColorR == r and frame.healthColorG == g and
-     frame.healthColorB == b then return end
+     frame.healthColorB == b and frame.healthGradient == gradient then
+    return
+  end
   frame.healthColorR, frame.healthColorG, frame.healthColorB = r, g, b
-  U.SetStatusBarColor(frame.health.bar, r, g, b, 1)
+  frame.healthGradient = gradient
+  U.PaintStatusBar(frame.health.bar, r, g, b, 1, gradient)
 end
 
 local function ApplyPowerColor(frame)
   if not frame.power then return end
   local r, g, b, a = PowerBarColor(frame.data.powerType)
+  local gradient = ColorConfig().gradientBars ~= false
   if frame.powerColorR == r and frame.powerColorG == g and
-     frame.powerColorB == b and frame.powerColorA == a then return end
+     frame.powerColorB == b and frame.powerColorA == a and
+     frame.powerGradient == gradient then
+    return
+  end
   frame.powerColorR, frame.powerColorG = r, g
   frame.powerColorB, frame.powerColorA = b, a
-  U.SetStatusBarColor(frame.power.bar, r, g, b, a)
+  frame.powerGradient = gradient
+  U.PaintStatusBar(frame.power.bar, r, g, b, a, gradient)
 end
 
 local function TokenNeedsRefresh(token, mode)
@@ -1795,10 +1794,12 @@ local function RefreshFrame(frame, mode)
       SetBar(frame.health.bar, 0, 1)
       if frame.power then SetBar(frame.power.bar, 0, 1) end
       local r, g, b = HealthBaseColor()
+      local gradient = ColorConfig().gradientBars ~= false
       if frame.healthColorR ~= r or frame.healthColorG ~= g or
-         frame.healthColorB ~= b then
+         frame.healthColorB ~= b or frame.healthGradient ~= gradient then
         frame.healthColorR, frame.healthColorG, frame.healthColorB = r, g, b
-        U.SetStatusBarColor(frame.health.bar, r, g, b, 1)
+        frame.healthGradient = gradient
+        U.PaintStatusBar(frame.health.bar, r, g, b, 1, gradient)
       end
       ClearTexts(frame)
     else
@@ -1947,11 +1948,14 @@ end
 local function ApplyDruidManaColor()
   if not druidBar then return end
   local r, g, b, a = PowerBarColor(0)
+  local gradient = ColorConfig().gradientBars ~= false
   if druidBar.colorR == r and druidBar.colorG == g and
-     druidBar.colorB == b and druidBar.colorA == a then return end
+     druidBar.colorB == b and druidBar.colorA == a and
+     druidBar.colorGradient == gradient then return end
   druidBar.colorR, druidBar.colorG = r, g
   druidBar.colorB, druidBar.colorA = b, a
-  U.SetStatusBarColor(druidBar.bar, r, g, b, a)
+  druidBar.colorGradient = gradient
+  U.PaintStatusBar(druidBar.bar, r, g, b, a, gradient)
 end
 
 local function RefreshDruidMana()
@@ -2078,16 +2082,20 @@ function U.ApplyUnitFrameColors()
     local frame = frames[frameOrder[i]]
     if frame and frame.data then
       frame.healthColorR, frame.healthColorG, frame.healthColorB = nil, nil, nil
+      frame.healthGradient = nil
       frame.powerColorR, frame.powerColorG = nil, nil
       frame.powerColorB, frame.powerColorA = nil, nil
+      frame.powerGradient = nil
 
-      -- A frame with no unit has no percentage to blend against; it keeps the
-      -- flat full-health colour the empty edit-mode shell already uses.
+      -- No unit: still paint the empty edit-mode shell so Gradient bars
+      -- matches the live frames instead of flattening to a solid fill.
       if frame.data.healthPercent then
         ApplyHealthColor(frame)
       else
         local r, g, b = HealthBaseColor()
-        U.SetStatusBarColor(frame.health.bar, r, g, b, 1)
+        local gradient = ColorConfig().gradientBars ~= false
+        frame.healthGradient = gradient
+        U.PaintStatusBar(frame.health.bar, r, g, b, 1, gradient)
       end
 
       if frame.data.powerType then ApplyPowerColor(frame) end
@@ -2100,6 +2108,7 @@ function U.ApplyUnitFrameColors()
   if druidBar then
     druidBar.colorR, druidBar.colorG = nil, nil
     druidBar.colorB, druidBar.colorA = nil, nil
+    druidBar.colorGradient = nil
     ApplyDruidManaColor()
   end
 end
