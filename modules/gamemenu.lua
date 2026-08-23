@@ -247,20 +247,10 @@ local function CaptureOrder(frame, buttons)
     return (at or 0) > (bt or 0)
   end)
 
-  local result, inserted = {}, false
+  -- Addon entries sit at the top, above client rows such as Donation Rewards.
+  local result = { qtpButton, bindButton }
   for i = 1, table.getn(sorted) do
-    local button = sorted[i]
-    if not inserted and (IsNamed(button, "GameMenuButtonLogout") or
-                         IsNamed(button, "GameMenuButtonQuit")) then
-      table.insert(result, qtpButton)
-      table.insert(result, bindButton)
-      inserted = true
-    end
-    table.insert(result, button)
-  end
-  if not inserted then
-    table.insert(result, qtpButton)
-    table.insert(result, bindButton)
+    table.insert(result, sorted[i])
   end
   table.insert(result, closeButton)
 
@@ -270,17 +260,17 @@ local function CaptureOrder(frame, buttons)
 end
 
 local function ButtonGroup(button)
-  if button == closeButton then return 5 end
+  if button == closeButton then return 6 end
   if IsNamed(button, "GameMenuButtonLogout") or
-     IsNamed(button, "GameMenuButtonQuit") then return 4 end
-  if button == qtpButton or button == bindButton or
-     IsNamed(button, "GameMenuButtonKeybindings") or
+     IsNamed(button, "GameMenuButtonQuit") then return 5 end
+  if button == qtpButton or button == bindButton then return 1 end
+  if IsNamed(button, "GameMenuButtonKeybindings") or
      IsNamed(button, "GameMenuButtonMacros") or
-     IsNamed(button, "GameMenuButtonAddOns") then return 3 end
+     IsNamed(button, "GameMenuButtonAddOns") then return 4 end
   if IsNamed(button, "GameMenuButtonOptions") or
      IsNamed(button, "GameMenuButtonSoundOptions") or
-     IsNamed(button, "GameMenuButtonUIOptions") then return 2 end
-  return 1
+     IsNamed(button, "GameMenuButtonUIOptions") then return 3 end
+  return 2
 end
 
 local function Layout(frame)
