@@ -281,13 +281,16 @@ local function RefreshTooltip(force)
   end
 
   local tipCfg = U.ModuleConfig("tooltip", { classColor = true })
-  -- Enemy NPC health: the client often reports 0-100. QtP.FormatMobHealth
-  -- turns that into real hit points from the creature table, same as the
-  -- target frame. Players and grouped units keep UnitHealth / UnitHealthMax.
+  -- Same health-text format as the unit frames (Unit Frames → Health text).
   if healthLabel and IsTruthy(Call("UnitExists", "mouseover")) then
     local text
-    if type(QtP) == "table" and type(QtP.FormatMobHealth) == "function" then
-      text = QtP.FormatMobHealth("mouseover")
+    if type(U.FormatHealthText) == "function" then
+      text = U.FormatHealthText("mouseover")
+    end
+    if not text then
+      if type(QtP) == "table" and type(QtP.FormatMobHealth) == "function" then
+        text = QtP.FormatMobHealth("mouseover")
+      end
     end
     if not text then
       local hp = Call("UnitHealth", "mouseover")

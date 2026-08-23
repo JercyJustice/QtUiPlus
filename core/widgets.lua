@@ -316,6 +316,223 @@ function U.CreateCyclePicker(parent, options)
 end
 
 -- ---------------------------------------------------------------------------
+-- Select (dropdown)
+--
+-- Popup list of { key, label } choices. The menu is parented to UIParent so
+-- the settings ScrollFrame cannot clip it. Native UIDropDownMenu is not used
+-- for addon settings on this client.
+-- ---------------------------------------------------------------------------
+local selectMenu
+local selectCatcher
+local selectOwner
+local SELECT_ROW_H = 18
+
+local function CloseSelectMenu()
+  if selectMenu then selectMenu:Hide() end
+  if selectCatcher then selectCatcher:Hide() end
+  selectOwner = nil
+end
+
+local function EnsureSelectMenu()
+  if selectMenu then return end
+
+  selectCatcher = CreateFrame("Button", "QtUiPlusSelectCatcher", UIParent)
+  selectCatcher:SetAllPoints(UIParent)
+  pcall(selectCatcher.SetFrameStrata, selectCatcher, "DIALOG")
+  pcall(selectCatcher.EnableMouse, selectCatcher, true)
+  selectCatcher:SetScript("OnClick", CloseSelectMenu)
+  selectCatcher:Hide()
+
+  selectMenu = U.CreatePanel(UIParent, {
+    name = "QtUiPlusSelectMenu",
+    width = 200,
+    height = 20,
+  })
+  pcall(selectMenu.SetFrameStrata, selectMenu, "DIALOG")
+  pcall(selectMenu.EnableMouse, selectMenu, true)
+  selectMenu:Hide()
+  selectMenu.rows = {}
+end
+
+local function OpenSelectMenu(control)
+  EnsureSelectMenu()
+  local shown = false
+  if selectMenu then
+    local ok, isShown = pcall(selectMenu.IsShown, selectMenu)
+    shown = ok and isShown and true or false
+  end
+  if selectOwner == control and shown then
+    CloseSelectMenu()
+    return
+  end
+
+  local values = control.values or {}
+  local n = table.getn(values)
+  if n < 1 then return end
+
+  local width = control.button and control.button:GetWidth() or 200
+  local height = 4 + n * SELECT_ROW_H
+  selectMenu:SetWidth(width)
+  selectMenu:SetHeight(height)
+
+  local selected = control.GetValue and control.GetValue() or nil
+  local i
+  for i = 1, n do
+    local spec = values[i]
+    local row = selectMenu.rows[i]
+    if not row then
+      row = U.CreateButton(selectMenu, {
+        name = "QtUiPlusSelectRow" .. i,
+        text = "",
+        width = width,
+        height = SELECT_ROW_H,
+        size = M.fontSize.small,
+      })
+      selectMenu.rows[i] = row
+    end
+    row:SetWidth(width)
+    row:ClearAllPoints()
+    row:SetPoint("TOPLEFT", selectMenu, "TOPLEFT", 0, -2 - (i - 1) * SELECT_ROW_H)
+    if row.label then
+      pcall(row.label.ClearAllPoints, row.label)
+      pcall(row.label.SetPoint, row.label, "LEFT", row, "LEFT", 8,
+            U.BUTTON_LABEL_OFFSET_Y or -2)
+      pcall(row.label.SetWidth, row.label, math.max(1, width - 16))
+      pcall(row.label.SetJustifyH, row.label, "LEFT")
+      pcall(row.label.SetText, row.label, spec.label or "")
+      local color = (spec.key == selected) and M.color.accent or M.color.text
+      pcall(row.label.SetTextColor, row.label, M.Unpack(color))
+    end
+    local key = spec.key
+    row:SetScript("OnClick", function()
+      local owner = selectOwner
+      CloseSelectMenu()
+      if not owner then return end
+      owner.SetValue(key)
+      if type(owner.onChange) == "function" then owner.onChange(key) end
+    end)
+    row:Show()
+  end
+  for i = n + 1, table.getn(selectMenu.rows) do
+    selectMenu.rows[i]:Hide()
+  end
+
+  local left = 0
+  local bottom = 0
+  local top = 0
+  if control.button then
+    left = tonumber(control.button:GetLeft()) or 0
+    bottom = tonumber(control.button:GetBottom()) or 0
+    top = tonumber(control.button:GetTop()) or 0
+  end
+  selectMenu:ClearAllPoints()
+  if (bottom - height) > 8 then
+    selectMenu:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, bottom)
+  else
+    selectMenu:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", left, top)
+  end
+
+  selectOwner = control
+  pcall(selectCatcher.SetFrameLevel, selectCatcher, 1)
+  pcall(selectMenu.SetFrameLevel, selectMenu, 20)
+  selectCatcher:Show()
+  selectMenu:Show()
+end
+
+function U.CreateSelect(parent, options)
+  options = options or {}
+
+  local width = options.width or 200
+  local height = options.height or 20
+  local choices = options.values or options.options or {}
+  local control = { values = choices, onChange = options.onChange }
+
+  local button = U.CreateButton(parent, {
+    name = options.name,
+    text = "",
+    width = width,
+    height = height,
+    size = M.fontSize.small,
+    onClick = function()
+      OpenSelectMenu(control)
+    end,
+  })
+  Part(control, button)
+  control.button = button
+  button:SetScript("OnHide", function()
+    if selectOwner == control then CloseSelectMenu() end
+  end)
+
+  local arrow = U.CreateLabel(button, {
+    size = M.fontSize.small,
+    color = M.color.accent,
+    inherits = "GameFontNormalSmall",
+  })
+  if arrow then
+    arrow:SetPoint("RIGHT", button, "RIGHT", -6, U.BUTTON_LABEL_OFFSET_Y or -2)
+    arrow:SetText("v")
+  end
+
+  if button.label then
+    pcall(button.label.ClearAllPoints, button.label)
+    pcall(button.label.SetPoint, button.label, "LEFT", button, "LEFT", 8,
+          U.BUTTON_LABEL_OFFSET_Y or -2)
+    pcall(button.label.SetPoint, button.label, "RIGHT",
+          arrow or button, arrow and "LEFT" or "RIGHT", -4,
+          U.BUTTON_LABEL_OFFSET_Y or -2)
+    pcall(button.label.SetJustifyH, button.label, "LEFT")
+    pcall(button.label.SetWidth, button.label, math.max(1, width - 28))
+  end
+
+  local caption = U.CreateSettingsLabel(parent, {
+    size = M.fontSize.small,
+    color = M.color.accent,
+    inherits = "GameFontNormalSmall",
+    width = width,
+    height = 14,
+  })
+  Part(control, caption)
+  control.caption = caption
+  if caption then caption:SetText(options.text or "") end
+
+  local function IndexOf(key)
+    local i
+    for i = 1, table.getn(control.values) do
+      if control.values[i].key == key then return i end
+    end
+    return 1
+  end
+
+  control.Apply = function()
+    local spec = control.values[control.index or 1]
+    local text = (spec and spec.label) or ""
+    if button.label then pcall(button.label.SetText, button.label, text) end
+  end
+
+  control.SetValue = function(key)
+    control.index = IndexOf(key)
+    control.Apply()
+  end
+
+  control.GetValue = function()
+    local spec = control.values[control.index or 1]
+    return spec and spec.key or nil
+  end
+
+  control.SetPoint = function(point, relative, relativePoint, x, y)
+    button:ClearAllPoints()
+    button:SetPoint(point, relative, relativePoint, x, y)
+    if caption then
+      caption:ClearAllPoints()
+      caption:SetPoint("BOTTOMLEFT", button, "TOPLEFT", 0, 2)
+    end
+  end
+
+  control.SetValue(options.value)
+  return control
+end
+
+-- ---------------------------------------------------------------------------
 -- Scroll view
 --
 -- Emberveil ScrollFrame clips and offsets a child (wiki ScrollFrame). Native

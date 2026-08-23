@@ -600,10 +600,8 @@ local function ReadHealth(frame)
   -- with UnitHealthMax fixed at 100. Measured on mouseover world units by the
   -- tooltip probe (behavior.json, probeVersion 1.9.0: 96/100, 97/100, 91/100)
   -- and confirmed in game on the target frame, where "84 - 84%" printed the
-  -- same number twice. When health *is* the percentage, the value half of the
-  -- dynamic text carries no extra information, so only the percentage is
-  -- drawn -- unless GetMobHealth resolves a real pool from the creature table
-  -- (QtUI's enemy health readout).
+  -- same number twice. GetMobHealth may resolve a real pool from the creature
+  -- table. The on-bar string is one setting (healthTextFormat) for every unit.
   data.healthIsPercent = data.healthMax == 100 and not REAL_HEALTH_UNITS[unit]
   data.mobHealth, data.mobHealthMax, data.mobHealthMode = nil, nil, nil
   if data.healthIsPercent and type(QtP) == "table" and
@@ -693,6 +691,9 @@ local function ColoredLevel(data)
   return Hex(lr, lg, lb) .. LevelString(data)
 end
 
+-- Assigned after ColorConfig exists: StatusText closes over this upvalue.
+local FormatHealthDyn
+
 -- Builds one of the pfUI text tokens this module supports. Only the tokens the
 -- layouts above actually use are implemented; pfUI's full token list is config
 -- surface QtUiPlus does not have.
@@ -720,25 +721,8 @@ local function StatusText(frame, token)
   end
 
   if token == "healthdyn" then
-    local hr, hg, hb = PastelText(Gradient(data.healthPercent))
-    local prefix = Hex(hr, hg, hb)
-
-    if data.isDead then return prefix .. (U.G("DEAD") or "Dead") end
-    if data.mobHealthMode == "hp" then
-      return prefix .. Abbreviate(data.mobHealth) .. " / " ..
-             Abbreviate(data.mobHealthMax)
-    end
-    if data.health ~= data.healthMax and data.healthMax > 0 then
-      if data.healthIsPercent then
-        return prefix .. math.ceil(data.healthPercent * 100) .. "%"
-      end
-      return prefix .. Abbreviate(data.health) .. " - " ..
-             math.ceil(data.healthPercent * 100) .. "%"
-    end
-    -- Full health on a percent-scaled unit still reads as a percentage, so it
-    -- keeps the "%" rather than printing a bare 100.
-    if data.healthIsPercent then return prefix .. "100%" end
-    return prefix .. Abbreviate(data.health)
+    if FormatHealthDyn then return FormatHealthDyn(data) end
+    return ""
   end
 
   if token == "powerdyn" then
@@ -1528,6 +1512,22 @@ local COLOR_DEFAULTS = {
   reactionColors    = false,
   -- QtUI "Gradient bars": left-to-right fade, clipped to current health.
   gradientBars      = true,
+  -- One health-text format for every unit (player, party, pet, target NPC).
+  -- currentpercent is the previous player-target look ("5.4k - 84%").
+  healthTextFormat  = "currentpercent",
+}
+
+-- Shown in the Unit Frames dropdown. The label is the format itself so the
+-- choice matches what appears on the bar.
+local HEALTH_TEXT_FORMATS = {
+  { key = "percent",           label = "84%" },
+  { key = "current",           label = "5.4k" },
+  { key = "currentmax",        label = "5.4k / 6.4k" },
+  { key = "currentpercent",    label = "5.4k - 84%" },
+  { key = "currentmaxpercent", label = "5.4k / 6.4k (84%)" },
+  { key = "percentcurrentmax", label = "84% (5.4k / 6.4k)" },
+  { key = "deficit",           label = "-1.0k" },
+  { key = "none",              label = "Hidden" },
 }
 
 do
@@ -1562,6 +1562,104 @@ local function ColorConfig()
   end
 
   return cfg
+end
+
+local function HealthTextFormat()
+  local key = ColorConfig().healthTextFormat
+  if type(key) ~= "string" or key == "" then return "currentpercent" end
+  return key
+end
+
+-- current / max / percent (0-1) / realHp. realHp is false when the client
+-- only reports a 0-100 percentage and the creature table did not resolve a
+-- pool: numeric formats then collapse to percent so "84 - 84%" is never drawn.
+local function HealthNumbers(data)
+  local percent = data.healthPercent or 0
+  if data.mobHealthMode == "hp" then
+    return data.mobHealth, data.mobHealthMax, percent, true
+  end
+  if data.healthIsPercent then
+    return data.health, data.healthMax, percent, false
+  end
+  return data.health, data.healthMax, percent, true
+end
+
+local function PercentText(percent)
+  return tostring(math.ceil((percent or 0) * 100)) .. "%"
+end
+
+local function FormatHealthValue(current, maximum, percent, realHp, format)
+  format = format or "currentpercent"
+  if format == "none" then return "" end
+
+  local pct = PercentText(percent)
+  if not realHp then
+    if format == "deficit" then
+      local missing = math.ceil((1 - (percent or 0)) * 100)
+      if missing <= 0 then return "" end
+      return "-" .. tostring(missing) .. "%"
+    end
+    return pct
+  end
+
+  local cur = Abbreviate(current)
+  local max = Abbreviate(maximum)
+  if format == "percent" then return pct end
+  if format == "current" then return cur end
+  if format == "currentmax" then return cur .. " / " .. max end
+  if format == "currentpercent" then return cur .. " - " .. pct end
+  if format == "currentmaxpercent" then
+    return cur .. " / " .. max .. " (" .. pct .. ")"
+  end
+  if format == "percentcurrentmax" then
+    return pct .. " (" .. cur .. " / " .. max .. ")"
+  end
+  if format == "deficit" then
+    local missing = (maximum or 0) - (current or 0)
+    if missing <= 0 then return "" end
+    return "-" .. Abbreviate(missing)
+  end
+  return cur .. " - " .. pct
+end
+
+FormatHealthDyn = function(data)
+  local hr, hg, hb = PastelText(Gradient(data.healthPercent))
+  local prefix = Hex(hr, hg, hb)
+  if data.isDead then return prefix .. (U.G("DEAD") or "Dead") end
+  local current, maximum, percent, realHp = HealthNumbers(data)
+  local text = FormatHealthValue(current, maximum, percent, realHp,
+                                 HealthTextFormat())
+  if text == "" then return "" end
+  return prefix .. text
+end
+
+-- Shared by the tooltip bar and the target nameplate so every surface uses
+-- the same Unit Frames format. Returns nil when the unit is missing.
+function U.FormatHealthText(unit)
+  if not unit then return nil end
+  if not ApiTruth("UnitExists", unit) then return nil end
+
+  if ApiTruth("UnitIsDead", unit) or ApiTruth("UnitIsGhost", unit) then
+    return U.G("DEAD") or "Dead"
+  end
+
+  local health = ApiNumber("UnitHealth", unit) or 0
+  local healthMax = ApiNumber("UnitHealthMax", unit) or 0
+  local percent = 0
+  if healthMax > 0 then percent = Clamp(health / healthMax) end
+
+  local isPercent = healthMax == 100 and not REAL_HEALTH_UNITS[unit]
+  if isPercent and type(QtP) == "table" and
+     type(QtP.GetMobHealth) == "function" then
+    local current, maximum, mode = QtP.GetMobHealth(unit)
+    if mode == "hp" then
+      return FormatHealthValue(current, maximum, percent, true,
+                               HealthTextFormat())
+    end
+  end
+
+  return FormatHealthValue(health, healthMax, percent, not isPercent,
+                           HealthTextFormat())
 end
 
 -- The two colours every bar resolves through. With the master switch off they
@@ -2601,6 +2699,21 @@ local function BuildUnitFrameColorSettings(parent, y)
   classTip.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, y - 98)
   table.insert(widgets, classTip)
 
+  local healthFormat = U.CreateSelect(parent, {
+    name = "QtUiPlusSettingsHealthTextFormat",
+    text = "Health text",
+    width = 240,
+    value = HealthTextFormat(),
+    values = HEALTH_TEXT_FORMATS,
+    onChange = function(value)
+      ColorConfig().healthTextFormat = value
+      RefreshAll()
+    end,
+  })
+  -- Caption sits above the button (CreateSelect SetPoint anchors the button).
+  healthFormat.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, y - 142)
+  table.insert(widgets, healthFormat)
+
   local healthPicker = U.CreateColorPicker(parent, {
     name = "QtUiPlusSettingsHealthColor",
     text = "Health bar color",
@@ -2628,7 +2741,7 @@ local function BuildUnitFrameColorSettings(parent, y)
     justify = "LEFT",
   })
   if powerHeader then
-    powerHeader:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, y - 124)
+    powerHeader:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, y - 172)
     powerHeader:SetText("Power bar colors")
     table.insert(widgets, powerHeader)
   end
@@ -2657,7 +2770,7 @@ local function BuildUnitFrameColorSettings(parent, y)
       end,
     })
     picker.SetPoint("TOPLEFT", parent, "TOPLEFT",
-                    12 + (i - 1) * COLUMN_WIDTH, y - 146)
+                    12 + (i - 1) * COLUMN_WIDTH, y - 194)
     table.insert(widgets, picker)
     table.insert(powerPickers, picker)
   end
@@ -2671,6 +2784,7 @@ local function BuildUnitFrameColorSettings(parent, y)
     reactionToggle.SetValue(cfg.reactionColors)
     gradientToggle.SetValue(cfg.gradientBars ~= false)
     classTip.SetValue(U.ModuleConfig("tooltip", { classColor = true }).classColor ~= false)
+    healthFormat.SetValue(HealthTextFormat())
 
     local n
     for n = 1, table.getn(POWER_TYPES) do

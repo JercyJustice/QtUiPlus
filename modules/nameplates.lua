@@ -635,11 +635,13 @@ local function RefreshPlate(overlay)
     if overlay.healthText then
       local text = ""
       if cfg.showHealthText and maximum > minimum then
-        if overlay.isTarget and type(QtP) == "table" and
-           type(QtP.FormatMobHealth) == "function" then
-          text = QtP.FormatMobHealth("target") or ""
+        local formatted
+        if overlay.isTarget and type(U.FormatHealthText) == "function" then
+          formatted = U.FormatHealthText("target")
         end
-        if text == "" then
+        if formatted ~= nil then
+          text = formatted
+        else
           local perc = (value - minimum) / (maximum - minimum) * 100
           text = string.format("%.1f%%", perc)
         end
