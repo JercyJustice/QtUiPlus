@@ -181,12 +181,18 @@ local function Layout()
 
   if ShowBackground() then
     U.CreateBackdrop(frame)
+    if U.SetBackdropShown then U.SetBackdropShown(frame, true) end
   else
-    if frame.SetBackdropColor then
-      pcall(frame.SetBackdropColor, frame, 0, 0, 0, 0)
-    end
-    if frame.SetBackdropBorderColor then
-      pcall(frame.SetBackdropBorderColor, frame, 0, 0, 0, 0)
+    -- CreateBackdrop draws the outline as four textures (qtpEdges), not as a
+    -- backdrop edgeFile. Zeroing SetBackdropBorderColor leaves those lines
+    -- on screen; hide the fill and the edges together.
+    if U.SetBackdropShown then U.SetBackdropShown(frame, false) end
+    if U.SetBorderColor then U.SetBorderColor(frame, 0, 0, 0, 0) end
+    local i
+    for i = 1, table.getn(frame.qtpEdges or {}) do
+      local edge = frame.qtpEdges[i]
+      pcall(edge.Hide, edge)
+      pcall(edge.SetAlpha, edge, 0)
     end
   end
 
