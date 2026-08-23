@@ -261,6 +261,8 @@ local STAT_COL_W = 112
 local STAT_ROW_H = 13
 local STAT_DROP_H = 18
 local STAT_ROWS = 6
+local STAT_GAP = 8
+local STAT_LABEL_W = 64
 local STAT_CATS = {
   { key = "base",          label = "Base Stats" },
   { key = "melee",         label = "Melee" },
@@ -276,6 +278,7 @@ local statLeft
 local statRight
 local statLeftRows
 local statRightRows
+local PlaceStatSelect
 
 local function Api(name, ...)
   local fn = U.G(name)
@@ -565,19 +568,21 @@ local function RefreshStatPanel()
     statRight.SetValue(cfg.rightCat or "melee")
     PaintColumn(statRightRows, CollectCategory(cfg.rightCat or "melee"))
   end
+  PlaceStatSelect()
 end
 
 local function MakeStatRows(parent, column)
   local rows = {}
   local height = STAT_DROP_H + 4 + STAT_ROWS * STAT_ROW_H
-  local x = (column - 1) * (STAT_COL_W + 8)
+  local x = (column - 1) * (STAT_COL_W + STAT_GAP)
   local i
   for i = 1, STAT_ROWS do
     local bottom = height - STAT_DROP_H - 4 - i * STAT_ROW_H
     local label = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     local value = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    PlaceStatText(label, parent, x, bottom, 64, STAT_ROW_H, "LEFT")
-    PlaceStatText(value, parent, x + 64, bottom, STAT_COL_W - 64, STAT_ROW_H, "RIGHT")
+    PlaceStatText(label, parent, x, bottom, STAT_LABEL_W, STAT_ROW_H, "LEFT")
+    PlaceStatText(value, parent, x + STAT_LABEL_W, bottom,
+                  STAT_COL_W - STAT_LABEL_W, STAT_ROW_H, "RIGHT")
     pcall(label.SetTextColor, label, DIM[1], DIM[2], DIM[3])
     pcall(value.SetTextColor, value, WHITE[1], WHITE[2], WHITE[3])
     rows[i] = { label = label, value = value }
@@ -585,16 +590,62 @@ local function MakeStatRows(parent, column)
   return rows
 end
 
+-- Emberveil ignores TOP offsets on some widgets, so the Melee CreateSelect
+-- sat a few pixels off the Base Stats box when both used TOPLEFT. Pin the
+-- left box with SetWidth/Height + one BOTTOMLEFT (frame recipe), then hang
+-- Melee off its BOTTOMRIGHT so they share a baseline. Do not add a second
+-- point: two points plus SetWidth stretches the button.
+PlaceStatSelect = function()
+  if not statOverlay then return end
+  local height = STAT_DROP_H + 4 + STAT_ROWS * STAT_ROW_H
+  local bottom = height - STAT_DROP_H
+
+  local function HideCaption(control)
+    if not control or not control.caption then return end
+    local cap = control.caption
+    pcall(cap.ClearAllPoints, cap)
+    pcall(cap.Hide, cap)
+    if cap.SetAlpha then pcall(cap.SetAlpha, cap, 0) end
+  end
+
+  local function SizeButton(btn)
+    if not btn then return end
+    pcall(btn.ClearAllPoints, btn)
+    pcall(btn.SetWidth, btn, STAT_COL_W)
+    pcall(btn.SetHeight, btn, STAT_DROP_H)
+  end
+
+  local leftBtn = statLeft and statLeft.button
+  SizeButton(leftBtn)
+  if leftBtn then
+    pcall(leftBtn.SetPoint, leftBtn, "BOTTOMLEFT", statOverlay, "BOTTOMLEFT",
+          0, bottom)
+  end
+  HideCaption(statLeft)
+
+  local rightBtn = statRight and statRight.button
+  SizeButton(rightBtn)
+  if rightBtn and leftBtn then
+    pcall(rightBtn.SetPoint, rightBtn, "BOTTOMLEFT", leftBtn, "BOTTOMRIGHT",
+          STAT_GAP, 0)
+  elseif rightBtn then
+    pcall(rightBtn.SetPoint, rightBtn, "BOTTOMLEFT", statOverlay, "BOTTOMLEFT",
+          STAT_COL_W + STAT_GAP, bottom)
+  end
+  HideCaption(statRight)
+end
+
 local function BuildStatPanel()
   if statOverlay then return end
   local host = G("CharacterAttributesFrame") or G("PaperDollFrame")
   if not host then return end
 
-  local width = STAT_COL_W * 2 + 8
+  local width = STAT_COL_W * 2 + STAT_GAP
   local height = STAT_DROP_H + 4 + STAT_ROWS * STAT_ROW_H
   statOverlay = CreateFrame("Frame", "QtUiPlusCharStats", host)
   statOverlay:SetWidth(width)
   statOverlay:SetHeight(height)
+  statOverlay:ClearAllPoints()
   statOverlay:SetPoint("TOPLEFT", host, "TOPLEFT", 0, 2)
   pcall(statOverlay.EnableMouse, statOverlay, false)
   local ok, level = pcall(host.GetFrameLevel, host)
@@ -614,8 +665,6 @@ local function BuildStatPanel()
       RefreshStatPanel()
     end,
   })
-  statLeft.SetPoint("TOPLEFT", statOverlay, "TOPLEFT", 0, 0)
-  if statLeft.caption then pcall(statLeft.caption.Hide, statLeft.caption) end
 
   statRight = U.CreateSelect(statOverlay, {
     name = "QtUiPlusCharStatRight",
@@ -628,8 +677,7 @@ local function BuildStatPanel()
       RefreshStatPanel()
     end,
   })
-  statRight.SetPoint("TOPLEFT", statOverlay, "TOPLEFT", STAT_COL_W + 8, 0)
-  if statRight.caption then pcall(statRight.caption.Hide, statRight.caption) end
+  PlaceStatSelect()
 
   statLeftRows = MakeStatRows(statOverlay, 1)
   statRightRows = MakeStatRows(statOverlay, 2)
