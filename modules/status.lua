@@ -1,9 +1,10 @@
 -- QtUiPlus :: modules/status.lua
 --
 -- A compact, movable readout for the small pieces of session information that
--- are useful at a glance: frame rate, network latency, money and equipment
--- durability.  Everything sits in one restrained information strip, matching
--- the reference layout without introducing a general panel system.
+-- are useful at a glance: frame rate, network latency, online player count,
+-- money and equipment durability.  Everything sits in one restrained
+-- information strip, matching the reference layout without introducing a
+-- general panel system.
 --
 -- The compact runtime DB has no direct records for GetFramerate, GetNetStats,
 -- GetMoney, tooltip inventory scanning, or the durability events.  Per the
@@ -12,7 +13,7 @@
 -- GameTooltip scanner over equipped inventory slots, respectively. This is
 -- WORKING_SOURCE evidence, not runtime verification.
 --
--- A second overlay reads total server population from /who. SendWho,
+-- The same strip also reads total server population from /who. SendWho,
 -- SetWhoToUI, and GetNumWhoResults's second return (the server-reported total
 -- match count) are OFFICIAL_CLIENT_DOCUMENTATION, DOCUMENTED_NOT_RUNTIME_
 -- VERIFIED; the query sequence (SetWhoToUI(1), SendWho, wait for
@@ -54,7 +55,6 @@ local BAGS_WARN_SLOTS = 1
 -- not something to repeat on a 1s poll.
 local bagsDirty = true
 
-local POP_WIDTH = 120
 -- One /who request per interval, so the addon never sends more than one
 -- SendWho call per POP_REFRESH_INTERVAL.
 local POP_REFRESH_INTERVAL = 60
@@ -77,8 +77,6 @@ local scanner
 local durabilityPattern
 local durabilityAge = 0
 
-local popAnchor
-local popDisplay
 local popPending -- true while a /who request is in flight
 local popOriginalFriendsFrameOnEvent
 
@@ -155,7 +153,7 @@ local function ApplyCompact()
   if not display then return end
   local compact = Compact()
   local captions = {
-    display.fpsCaption, display.latencyCaption,
+    display.fpsCaption, display.latencyCaption, display.onlineCaption,
     display.durabilityCaption, display.bagsCaption,
   }
   local i
@@ -178,6 +176,7 @@ local function UpdateOverlayWidth()
   local width = HORIZONTAL_PADDING
   width = width + CaptionWidth(display.fpsCaption) + 2 + LabelWidth(display.fpsValue)
   width = width + MODULE_GAP + CaptionWidth(display.latencyCaption) + 2 + LabelWidth(display.latencyValue)
+  width = width + MODULE_GAP + CaptionWidth(display.onlineCaption) + 2 + LabelWidth(display.onlineValue)
   width = width + MODULE_GAP + CaptionWidth(display.durabilityCaption) + 2 + LabelWidth(display.durabilityValue)
   width = width + MODULE_GAP + CaptionWidth(display.bagsCaption) + 2 + LabelWidth(display.bagsValue)
   width = width + MODULE_GAP
@@ -220,10 +219,22 @@ local function Build()
   })
   display.latencyValue:SetPoint("LEFT", display.latencyCaption, "RIGHT", 2, 0)
 
+  display.onlineCaption = U.CreateLabel(anchor, {
+    size = M.fontSize.normal, inherits = "GameFontNormal", color = M.color.text,
+  })
+  display.onlineCaption:SetPoint("LEFT", display.latencyValue, "RIGHT", MODULE_GAP, 0)
+  display.onlineCaption:SetText("Online:")
+
+  display.onlineValue = U.CreateLabel(anchor, {
+    size = M.fontSize.normal, inherits = "GameFontNormal", color = M.color.text,
+  })
+  display.onlineValue:SetPoint("LEFT", display.onlineCaption, "RIGHT", 2, 0)
+  display.onlineValue:SetText("--")
+
   display.durabilityCaption = U.CreateLabel(anchor, {
     size = M.fontSize.normal, inherits = "GameFontNormal", color = M.color.text,
   })
-  display.durabilityCaption:SetPoint("LEFT", display.latencyValue, "RIGHT", MODULE_GAP, 0)
+  display.durabilityCaption:SetPoint("LEFT", display.onlineValue, "RIGHT", MODULE_GAP, 0)
   display.durabilityCaption:SetText("Durability:")
 
   display.durabilityValue = U.CreateLabel(anchor, {
@@ -276,45 +287,6 @@ local function Build()
   })
 end
 
-local function UpdatePopulationWidth()
-  if not popAnchor or not popDisplay then return end
-
-  local width = HORIZONTAL_PADDING
-  width = width + LabelWidth(popDisplay.serverCaption) + 2 + LabelWidth(popDisplay.serverValue)
-  width = width + HORIZONTAL_PADDING
-  popAnchor:SetWidth(width)
-end
-
-local function BuildPopulation()
-  popAnchor = CreateFrame("Frame", "QtUiPlusPopulationAnchor", UIParent)
-  popAnchor:SetWidth(POP_WIDTH)
-  popAnchor:SetHeight(HEIGHT)
-  U.CreateBackdrop(popAnchor, {
-    background = { 0.035, 0.035, 0.035, 0.20 },
-    border = false,
-  })
-
-  popDisplay = {}
-  popDisplay.serverCaption = U.CreateLabel(popAnchor, {
-    size = M.fontSize.normal, inherits = "GameFontNormal", color = M.color.text,
-  })
-  popDisplay.serverCaption:SetPoint("LEFT", popAnchor, "LEFT", HORIZONTAL_PADDING, 0)
-  popDisplay.serverCaption:SetText("Online:")
-
-  popDisplay.serverValue = U.CreateLabel(popAnchor, {
-    size = M.fontSize.normal, inherits = "GameFontNormal", color = M.color.text,
-  })
-  popDisplay.serverValue:SetPoint("LEFT", popDisplay.serverCaption, "RIGHT", 2, 0)
-  popDisplay.serverValue:SetText("--")
-
-  U.RegisterMover("status.population", popAnchor, {
-    label = "Online Count Overlay",
-    default = { point = "BOTTOMLEFT", relativePoint = "BOTTOMLEFT", x = 20, y = 20 + HEIGHT + 6 },
-  })
-
-  UpdatePopulationWidth()
-end
-
 -- Marks a /who request in flight and suppresses the native Friends/Who frame
 -- for its duration so a background population poll cannot pop or repaint it
 -- (the UnrealPfUI recipe this follows: FriendsFrame_OnEvent is swapped for a
@@ -361,9 +333,9 @@ local function OnWhoListUpdate()
 
   FinishWho()
 
-  if not popDisplay then return end
-  SetLabel(popDisplay.serverValue, total and tostring(total) or "--", M.color.text)
-  UpdatePopulationWidth()
+  if not display then return end
+  SetLabel(display.onlineValue, total and tostring(total) or "--", M.color.text)
+  UpdateOverlayWidth()
 end
 
 -- Ticks once per POP_REFRESH_INTERVAL; caps the addon at one SendWho call
@@ -578,7 +550,6 @@ function S:OnEnable()
   if anchor then return end
   Build()
   BuildScanner()
-  BuildPopulation()
 
   U.RegisterEvent("WHO_LIST_UPDATE", OnWhoListUpdate)
   -- Interval-only: population must not also refresh on PLAYER_ENTERING_WORLD,
@@ -624,4 +595,5 @@ function S:OnEnable()
   RefreshDurability()
   RefreshBags()
   RefreshClock()
+  RefreshPopulation()
 end
