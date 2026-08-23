@@ -1157,11 +1157,75 @@ end
 
 local SHARE_PREFIX = "QtP"
 
+-- SendChatMessage is protected on Emberveil (wiki Communication): addons
+-- cannot call it. SendAddonMessage is not protected, but it is a hidden
+-- addon payload -- it never appears in party/raid chat. FrameXML
+-- ChatEdit_SendText still sends (same path WIM uses on this client).
+-- Slash text is queued so nine report lines cannot flood in one frame.
 local function AnnounceLine(text, chatType)
-  if QtP.Print then QtP:Print(text) end
-  if type(chatType) ~= "string" or chatType == "" or chatType == "SELF" then return end
-  if type(SendAddonMessage) ~= "function" then return end
-  pcall(SendAddonMessage, SHARE_PREFIX, "R:" .. tostring(text), chatType)
+  text = tostring(text or "")
+  if type(chatType) ~= "string" or chatType == "" or chatType == "SELF" then
+    if QtP.Print then QtP:Print(text) end
+    return
+  end
+
+  local slash
+  if chatType == "PARTY" then
+    slash = "/p "
+  elseif chatType == "RAID" then
+    local raid = tonumber(GetNumRaidMembers()) or 0
+    if raid > 0 then slash = "/raid " else slash = "/p " end
+  elseif chatType == "GUILD" then
+    slash = "/g "
+  end
+  if not slash then
+    if QtP.Print then QtP:Print(text) end
+    return
+  end
+
+  if slash == "/p " then
+    local raid = tonumber(GetNumRaidMembers()) or 0
+    local party = tonumber(GetNumPartyMembers()) or 0
+    if raid < 1 and party < 1 then
+      if QtP.Print then QtP:Print("Not in a group.") end
+      return
+    end
+  end
+
+  local ticker = QtP.meterReportTicker
+  if not ticker then
+    ticker = CreateFrame("Frame", "QtPMeterReport")
+    QtP.meterReportTicker = ticker
+    ticker.qtpQueue = {}
+  end
+  table.insert(ticker.qtpQueue, slash .. text)
+  if ticker.qtpBusy then return end
+  ticker.qtpBusy = true
+  ticker.qtpWait = 0.25
+  ticker:SetScript("OnUpdate", function()
+    this.qtpWait = (this.qtpWait or 0) + (arg1 or 0)
+    if this.qtpWait < 0.25 then return end
+    this.qtpWait = 0
+    local pending = this.qtpQueue
+    if not pending or table.getn(pending) < 1 then
+      this.qtpBusy = nil
+      this:SetScript("OnUpdate", nil)
+      return
+    end
+    local line = table.remove(pending, 1)
+    local box = ChatFrameEditBox
+    if box and box.SetText and type(ChatEdit_SendText) == "function" then
+      local prev
+      if box.GetText then prev = box:GetText() end
+      local prevType = box.chatType
+      pcall(box.SetText, box, line)
+      pcall(ChatEdit_SendText, box, 0)
+      if prev then pcall(box.SetText, box, prev) end
+      if prevType then box.chatType = prevType end
+    elseif QtP.Print then
+      QtP:Print(line)
+    end
+  end)
 end
 
 local function HandleAddonShare()
@@ -3294,7 +3358,7 @@ CreateMeterWindow = function(id, view, segment)
   end, "reset")
   frame.btnReport = MakeMeterButton(frame, "P", {
     "Report",
-    "Share with other QtP users. Self prints only to you.",
+    "Send the current list to Party, Raid, Guild, or yourself.",
   }, function()
     ToggleReportMenu(this, frame)
   end, "announce")
