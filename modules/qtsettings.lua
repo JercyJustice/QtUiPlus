@@ -163,7 +163,14 @@ local function BuildPage(parent)
     table.insert(widgets, unshiftHint)
   end
 
-  boxes.estimateMobHealth = LayoutToggle(parent, widgets, 9, {
+  boxes.vendorPrices = LayoutToggle(parent, widgets, 9, {
+    key = "vendorPrices",
+    text = "Vendor prices on tooltips",
+    description = "Adds the vendor sell price to bag, bank, loot and " ..
+                  "equipped item tooltips, multiplied by the stack size.",
+  })
+
+  boxes.estimateMobHealth = LayoutToggle(parent, widgets, 10, {
     key = "estimateMobHealth",
     text = "Enemy health from creature table",
     description = "Resolves real hit points for enemies the client reports " ..
@@ -186,7 +193,7 @@ local function BuildPage(parent)
       end
     end,
   })
-  meter.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, ROW_START - 10 * ROW_STEP)
+  meter.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, ROW_START - 11 * ROW_STEP)
   table.insert(widgets, meter)
   boxes.damageMeter = meter
 
@@ -309,7 +316,68 @@ local function BuildMeterPage(parent)
     table.insert(widgets, slider)
   end
 
+  -- Window add/close. QtUI put these in its own settings window, which was not
+  -- ported, so until now /qtp meter add was the only way to open a second
+  -- window and there was no way to discover it.
+  local countLabel = U.CreateSettingsLabel(parent, {
+    size = M.fontSize.normal, color = M.color.text,
+    inherits = "GameFontNormal", justify = "LEFT",
+  })
+
+  local UpdateCount
+  UpdateCount = function()
+    if not countLabel then return end
+    local n = 0
+    if type(QtP.MeterWindowCount) == "function" then
+      n = tonumber(QtP:MeterWindowCount()) or 0
+    end
+    countLabel:SetText("Open windows: |cffffff00" .. n .. "|r")
+  end
+
+  local addButton = U.CreateButton(parent, {
+    name = "QtUiPlusMeterAdd",
+    text = "Add window",
+    width = 140, height = 26,
+    onClick = function()
+      if type(QtP.AddDamageMeterWindow) ~= "function" then
+        U.Print("damage meter is not loaded")
+        return
+      end
+      -- No view argument: the meter then picks the next unused mode, so a new
+      -- window shows something different from the ones already open rather
+      -- than a duplicate of window 1.
+      local frame = QtP:AddDamageMeterWindow()
+      if not frame then
+        U.Print("cannot add another meter window (limit reached, or the " ..
+                "meter is disabled)")
+      end
+      UpdateCount()
+    end,
+  })
+  addButton:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -290)
+  table.insert(widgets, addButton)
+
+  local closeButton = U.CreateButton(parent, {
+    name = "QtUiPlusMeterClose",
+    text = "Close window",
+    width = 140, height = 26,
+    onClick = function()
+      if type(QtP.CloseLastDamageMeterWindow) == "function" then
+        QtP:CloseLastDamageMeterWindow()
+      end
+      UpdateCount()
+    end,
+  })
+  closeButton:SetPoint("TOPLEFT", parent, "TOPLEFT", 150, -290)
+  table.insert(widgets, closeButton)
+
+  if countLabel then
+    countLabel:SetPoint("TOPLEFT", parent, "TOPLEFT", 300, -297)
+    table.insert(widgets, countLabel)
+  end
+
   local function Refresh()
+    UpdateCount()
     local current = QtP:GetLayout()
     background.SetValue(current.meterShowBackground ~= false)
     askInstance.SetValue(current.meterAskInstance == true)

@@ -1469,8 +1469,15 @@ handlers["meter"] = function(rest)
     QtP:HideDamageMeter()
     U.Print("damage meter hidden")
   elseif action == "add" then
-    QtP:AddDamageMeterWindow("damage", 1)
-    U.Print("added a meter window (" .. tostring(QtP:MeterWindowCount()) .. " open)")
+    -- No view argument, so the meter picks the next unused mode instead of
+    -- opening a duplicate of window 1.
+    local added = QtP:AddDamageMeterWindow()
+    if added then
+      U.Print("added a meter window (" .. tostring(QtP:MeterWindowCount()) .. " open)")
+    else
+      U.Print("could not add a window - the limit is reached, or the meter " ..
+              "has not been set up yet")
+    end
   elseif action == "close" then
     QtP:CloseLastDamageMeterWindow()
     U.Print("closed a meter window (" .. tostring(QtP:MeterWindowCount()) .. " open)")
