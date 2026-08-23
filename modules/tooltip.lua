@@ -424,6 +424,14 @@ end
 local ANCHOR_W, ANCHOR_H = 180, 72
 local tooltipAnchor
 
+-- GetOwner is not on the GameTooltip wiki page, so IsCornerTooltip used to
+-- treat every tooltip as a world/corner one and PlaceAtAnchor stole item
+-- hovers (merchant Flamberge sitting on the dummy). We record the last
+-- SetOwner ourselves instead.
+local ownedBy
+local ownedAnchor
+local itemCursor
+
 -- Item fills that should follow the mouse. Compare setters
 -- (SetMerchantCompareItem / SetAuctionCompareItem) stay on ShoppingTooltip
 -- and are not listed. Spellbook / action / talent / aura fills stay on the
@@ -473,21 +481,39 @@ local function TooltipOwner(tooltip)
 end
 
 local function IsCornerTooltip(tooltip)
-  local owner = TooltipOwner(tooltip)
-  if not owner then return true end
+  local owner = TooltipOwner(tooltip) or ownedBy
+  if not owner then return false end
   return owner == UIParent or owner == U.G("WorldFrame")
 end
 
+local function RememberOwner(owner, anchor)
+  ownedBy = owner
+  if type(anchor) == "string" then ownedAnchor = anchor end
+end
+
 -- Wiki: SetOwner clears lines and stores the anchor. Safe only before a fill.
--- Do not fall back to UIParent: that would steal a button owner (paperdoll
--- Character*Slot) and then eqcompare cannot see IsOwned(slot).
+-- UIParent is a valid cursor owner (ANCHOR_CURSOR ignores the frame and
+-- follows the mouse). Prefer the recorded button so paperdoll IsOwned still
+-- sees Character*Slot.
 local function FollowCursor(tooltip, owner)
   if not tooltip or not tooltip.SetOwner then return end
-  local kind = AnchorType(tooltip)
+  local kind = AnchorType(tooltip) or ownedAnchor
   if kind == "ANCHOR_CURSOR" or kind == "ANCHOR_PRESERVE" then return end
-  owner = owner or TooltipOwner(tooltip)
-  if not owner then return end
+  owner = owner or ownedBy or TooltipOwner(tooltip) or UIParent
+  RememberOwner(owner, "ANCHOR_CURSOR")
+  itemCursor = true
   pcall(tooltip.SetOwner, tooltip, owner, "ANCHOR_CURSOR")
+end
+
+local function HookSetOwner(tooltip)
+  if not tooltip then return end
+  local original = tooltip.SetOwner
+  if original == nil then return end
+  tooltip.SetOwner = function(self, owner, anchor, x, y)
+    RememberOwner(owner, anchor)
+    local ok, r1, r2, r3 = pcall(original, self, owner, anchor, x, y)
+    if ok then return r1, r2, r3 end
+  end
 end
 
 local function HookCursorSetters(tooltip)
@@ -498,6 +524,7 @@ local function HookCursorSetters(tooltip)
     local original = tooltip[name]
     if original ~= nil then
       tooltip[name] = function(self, a, b, c, d)
+        itemCursor = true
         FollowCursor(self)
         local ok, r1, r2, r3 = pcall(original, self, a, b, c, d)
         if ok then return r1, r2, r3 end
@@ -544,6 +571,7 @@ function TT.OnEnable()
   BuildTooltipAnchor()
 
   local tooltip = U.G("GameTooltip")
+  HookSetOwner(tooltip)
   HookCursorSetters(tooltip)
 
   -- Vanilla world-unit tooltips go through this global with UIParent or
@@ -556,15 +584,21 @@ function TT.OnEnable()
         FollowCursor(tip, parent)
         return
       end
+      itemCursor = false
       PlaceAtAnchor(tip)
     end)
   end
 
   if tooltip then
     U.PostHookScript(tooltip, "OnShow", function()
-      local kind = AnchorType(tooltip)
-      if kind == "ANCHOR_CURSOR" or kind == "ANCHOR_PRESERVE" then return end
+      local kind = AnchorType(tooltip) or ownedAnchor
+      if itemCursor or kind == "ANCHOR_CURSOR" or kind == "ANCHOR_PRESERVE" then
+        return
+      end
       if IsCornerTooltip(tooltip) then PlaceAtAnchor(tooltip) end
+    end)
+    U.PostHookScript(tooltip, "OnHide", function()
+      itemCursor = false
     end)
   end
 
