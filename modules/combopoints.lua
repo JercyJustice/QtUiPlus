@@ -326,9 +326,11 @@ end
 function CP:OnInit()
   cfg = U.ModuleConfig("combopoints", DEFAULTS)
   if type(U.RegisterSettingsTab) == "function" then
-    U.RegisterSettingsTab("combopoints", "Combo Points", BuildSettingsPage, {
-      parent = "unitframes",
-    })
+    -- No parent: modules/settings.lua only shows a parented page while its
+    -- parent GROUP is expanded, and "unitframes" is a page (owned by
+    -- modules/auras.lua), not a group -- so parenting to it would have hidden
+    -- this page from the sidebar entirely.
+    U.RegisterSettingsTab("combopoints", "Combo Points", BuildSettingsPage)
   end
 end
 

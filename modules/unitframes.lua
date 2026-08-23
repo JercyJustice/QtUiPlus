@@ -134,6 +134,36 @@ end
 -- own literal, so the two can never drift apart again.
 local PRIMARY_WIDTH = 180
 
+-- ---------------------------------------------------------------------------
+-- Size configuration
+--
+-- The SPECS below carry the shipped defaults; these settings override them.
+-- Sizes are applied INTO the spec tables before any frame is built, so
+-- BuildFrame keeps reading spec.width / spec.health / spec.power exactly as
+-- before and there is no second source of truth for a frame's geometry.
+--
+-- Grouped by frame kind rather than per frame: the four party members always
+-- share a size, and nobody wants to set the same three sliders four times.
+-- ---------------------------------------------------------------------------
+local SIZE_LIMITS = {
+  width       = { min = 80,  max = 420, step = 1 },
+  healthHeight = { min = 8,  max = 80,  step = 1 },
+  powerHeight = { min = 4,   max = 40,  step = 1 },
+  spacing     = { min = 4,   max = 90,  step = 1 },
+}
+
+-- kind -> which spec ids it drives. Party is one setting for four frames.
+local SIZE_GROUPS = {
+  { key = "player",       label = "Player",           ids = { "player" },       power = true },
+  { key = "target",       label = "Target",           ids = { "target" },       power = true },
+  { key = "targettarget", label = "Target of Target", ids = { "targettarget" }, power = false },
+  { key = "pet",          label = "Pet",              ids = { "pet" },          power = true },
+  { key = "party",        label = "Party",
+    ids = { "party1", "party2", "party3", "party4" }, power = true, spacing = true },
+}
+
+local sizeCfg
+
 local SPECS = {
   {
     -- health raised from 26 to 34 (+30%) by request.
@@ -209,6 +239,86 @@ do
       anchorPoint = "TOPLEFT", anchorRelativePoint = "TOPLEFT",
       anchorOffsetX = 0, anchorOffsetY = -((i - 1) * PARTY_SPACING),
     })
+  end
+end
+
+-- Built from the SPECS above so the shipped geometry stays the single source
+-- of the defaults: changing a spec changes the default, with no second copy to
+-- keep in step.
+local function BuildSizeDefaults()
+  local defaults = {}
+  local i
+  for i = 1, table.getn(SIZE_GROUPS) do
+    local group = SIZE_GROUPS[i]
+    local spec
+    local j
+    for j = 1, table.getn(SPECS) do
+      if SPECS[j].id == group.ids[1] then spec = SPECS[j] end
+    end
+    if spec then
+      defaults[group.key .. "Width"] = spec.width
+      defaults[group.key .. "HealthHeight"] = spec.health
+      if group.power and spec.power then
+        defaults[group.key .. "PowerHeight"] = spec.power
+      end
+    end
+  end
+  defaults.partySpacing = PARTY_SPACING
+  return defaults
+end
+
+local function ClampSize(name, value)
+  local limit = SIZE_LIMITS[name]
+  value = tonumber(value)
+  if not limit then return value end
+  if not value then return limit.min end
+  value = U.Round(value)
+  if value < limit.min then value = limit.min end
+  if value > limit.max then value = limit.max end
+  return value
+end
+
+-- Writes the configured sizes into the spec tables. Called before the frames
+-- are built, and again whenever a slider moves.
+local function ApplySizesToSpecs()
+  if not sizeCfg then return end
+
+  local i
+  for i = 1, table.getn(SIZE_GROUPS) do
+    local group = SIZE_GROUPS[i]
+    local width = ClampSize("width", sizeCfg[group.key .. "Width"])
+    local health = ClampSize("healthHeight", sizeCfg[group.key .. "HealthHeight"])
+    local power = sizeCfg[group.key .. "PowerHeight"]
+    if power ~= nil then power = ClampSize("powerHeight", power) end
+
+    local j
+    for j = 1, table.getn(SPECS) do
+      local spec = SPECS[j]
+      local k
+      for k = 1, table.getn(group.ids) do
+        if spec.id == group.ids[k] then
+          if width then spec.width = width end
+          if health then spec.health = health end
+          -- Only touch power on a spec that has one: targettarget has no power
+          -- bar and must not grow one from a stale saved value.
+          if power and spec.power then spec.power = power end
+        end
+      end
+    end
+  end
+
+  -- Party spacing is an anchor offset, not a spec size.
+  local spacing = ClampSize("spacing", sizeCfg.partySpacing)
+  if spacing then
+    local j
+    for j = 1, table.getn(SPECS) do
+      local spec = SPECS[j]
+      local index = string.find(spec.id or "", "^party(%d)$") and
+                    tonumber(string.sub(spec.id, 6))
+      if index then
+        spec.anchorOffsetY = -((index - 1) * spacing)
+      end
+    end
   end
 end
 
@@ -985,6 +1095,9 @@ local function BuildFrame(spec, parent)
 
   frame:SetWidth(FrameWidth(spec) + barOffsetX)
   frame:SetHeight(FrameHeight(spec))
+  -- Kept for ResizeFrame below: whether this frame reserves a portrait square
+  -- is decided once, here, and must not be re-derived on every resize.
+  frame.qtpHasPortrait = hasPortrait and true or false
   frame.unit = spec.unit
   frame.spec = spec
   frame.data = {}
@@ -1043,6 +1156,79 @@ local function BuildFrame(spec, parent)
   frame:Hide()
   frame.qtpShown = false
   return frame
+end
+
+-- ---------------------------------------------------------------------------
+-- Live resize
+--
+-- Re-applies a spec's geometry to an already-built frame, so a size slider
+-- takes effect immediately instead of needing a reload.
+--
+-- The bar fill is computed from the bar's own GetWidth (core/style.lua), so a
+-- bar that is resized without re-running that maths keeps drawing its old fill
+-- width. There is no public "recompute" call, but SetValue re-runs it, so the
+-- current value is written back after every resize.
+-- ---------------------------------------------------------------------------
+local function ResizeBarBox(box, width, height, border)
+  if not box then return end
+  box:SetWidth(width + 2 * border)
+  box:SetHeight(height + 2 * border)
+
+  local bar = box.bar
+  if not bar then return end
+  bar:SetWidth(width)
+  bar:SetHeight(height)
+  if bar.GetValue and bar.SetValue then
+    local ok, value = pcall(bar.GetValue, bar)
+    if ok then pcall(bar.SetValue, bar, value) end
+  end
+end
+
+local function ResizeFrame(frame)
+  if not frame or not frame.spec then return end
+  local spec = frame.spec
+  local border = U.BorderSize()
+
+  local portraitSize = FrameHeight(spec)
+  local barOffsetX = 0
+  if frame.qtpHasPortrait then barOffsetX = portraitSize + PORTRAIT_GAP end
+
+  frame:SetWidth(FrameWidth(spec) + barOffsetX)
+  frame:SetHeight(FrameHeight(spec))
+
+  if frame.portrait then
+    frame.portrait:SetWidth(portraitSize)
+    frame.portrait:SetHeight(portraitSize)
+  end
+
+  ResizeBarBox(frame.health, spec.width, spec.health, border)
+  if frame.health then
+    frame.health:ClearAllPoints()
+    frame.health:SetPoint("TOPLEFT", frame, "TOPLEFT", barOffsetX, 0)
+  end
+
+  if frame.power and spec.power then
+    ResizeBarBox(frame.power, spec.width, spec.power, border)
+    frame.power:ClearAllPoints()
+    frame.power:SetPoint("TOPLEFT", frame.health, "BOTTOMLEFT", 0, -spec.gap)
+  end
+
+  -- Anchored frames (targettarget, the party members) carry their offset in
+  -- the spec, and party spacing changes it, so re-apply it here too.
+  if spec.anchorTo and frames[spec.anchorTo] then
+    frame:ClearAllPoints()
+    frame:SetPoint(spec.anchorPoint or "TOPLEFT", frames[spec.anchorTo],
+                   spec.anchorRelativePoint or "TOPLEFT",
+                   spec.anchorOffsetX or 0, spec.anchorOffsetY or 0)
+  end
+end
+
+local function ResizeAllFrames()
+  ApplySizesToSpecs()
+  local i
+  for i = 1, table.getn(frameOrder) do
+    ResizeFrame(frames[frameOrder[i]])
+  end
 end
 
 -- ---------------------------------------------------------------------------
@@ -2086,8 +2272,106 @@ end
 
 U.BuildUnitFrameColorSettings = BuildUnitFrameColorSettings
 
+-- ---------------------------------------------------------------------------
+-- Size settings API and pages
+-- ---------------------------------------------------------------------------
+function U.UnitFrameSizeLimits(name)
+  local limit = SIZE_LIMITS[name]
+  if not limit then return nil end
+  return limit.min, limit.max, limit.step
+end
+
+function U.GetUnitFrameSize(key)
+  if not sizeCfg then return nil end
+  return sizeCfg[key]
+end
+
+function U.SetUnitFrameSize(key, value)
+  if not sizeCfg then return nil end
+  sizeCfg[key] = tonumber(value) or sizeCfg[key]
+  ResizeAllFrames()
+  return sizeCfg[key]
+end
+
+local SIZE_PAGE_GROUP = "unitsizes"
+
+local function BuildSizePage(group)
+  return function(parent)
+    local widgets, controls = {}, {}
+
+    local header = U.CreateSectionHeader(parent, {
+      text = group.label, width = 484, y = -4,
+    })
+    table.insert(widgets, header)
+
+    -- Only the rows this frame kind actually has: targettarget has no power
+    -- bar, and only the party has a spacing between members.
+    local rows = {
+      { key = group.key .. "Width",        limit = "width",        text = "Frame Width" },
+      { key = group.key .. "HealthHeight", limit = "healthHeight", text = "Health Bar Height" },
+    }
+    if group.power then
+      table.insert(rows, { key = group.key .. "PowerHeight",
+                           limit = "powerHeight", text = "Power Bar Height" })
+    end
+    if group.spacing then
+      table.insert(rows, { key = "partySpacing", limit = "spacing",
+                           text = "Spacing Between Members" })
+    end
+
+    local i
+    for i = 1, table.getn(rows) do
+      local row = rows[i]
+      local minimum, maximum, step = U.UnitFrameSizeLimits(row.limit)
+      local slider = U.CreateSlider(parent, {
+        name = "QtUiPlusUnitSize" .. row.key,
+        text = row.text,
+        width = 200,
+        min = minimum, max = maximum, step = step,
+        value = U.GetUnitFrameSize(row.key),
+        onChange = function(value) U.SetUnitFrameSize(row.key, value) end,
+      })
+      slider.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -40 - (i - 1) * 44)
+      controls[row.key] = slider
+      table.insert(widgets, slider)
+    end
+
+    local function Refresh()
+      local j
+      for j = 1, table.getn(rows) do
+        local key = rows[j].key
+        if controls[key] then controls[key].SetValue(U.GetUnitFrameSize(key)) end
+      end
+    end
+
+    return widgets, Refresh
+  end
+end
+
+function UF:OnInit()
+  sizeCfg = U.ModuleConfig("unitframes", BuildSizeDefaults())
+  -- Before OnEnable builds anything, so the frames are created at the saved
+  -- size rather than being built default and resized a moment later.
+  ApplySizesToSpecs()
+
+  if type(U.RegisterSettingsGroup) ~= "function" then return end
+  U.RegisterSettingsGroup(SIZE_PAGE_GROUP, "Frame Sizes")
+
+  local i
+  for i = 1, table.getn(SIZE_GROUPS) do
+    local group = SIZE_GROUPS[i]
+    U.RegisterSettingsTab(SIZE_PAGE_GROUP .. "." .. group.key, group.label,
+                          BuildSizePage(group), { parent = SIZE_PAGE_GROUP })
+  end
+end
+
 function UF:OnEnable()
   if table.getn(frameOrder) > 0 then return end
+
+  if not sizeCfg then
+    sizeCfg = U.ModuleConfig("unitframes", BuildSizeDefaults())
+    ApplySizesToSpecs()
+  end
 
   SuppressStockFrames()
 
