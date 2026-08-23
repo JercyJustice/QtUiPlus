@@ -83,11 +83,83 @@ local BUFF_ANCHOR_H = 36
 local buffAnchor
 local debuffAnchor
 
+local function MinimapCfg()
+  return U.ModuleConfig("minimap", {
+    enabled = true,
+    showBuffs = true,
+    showDebuffs = true,
+  })
+end
+
 local function Glue(frame, point, relative, relativePoint, x, y)
   if not frame or not relative then return end
   pcall(frame.ClearAllPoints, frame)
   pcall(frame.SetPoint, frame, point, relative, relativePoint, x or 0, y or 0)
 end
+
+-- Hide() on this client is not always persistent (compat native-frame hide),
+-- so alpha 0 is the real off switch. Mouse is dropped so an invisible row
+-- cannot eat clicks. Empty BuffButtons are not Show()'d on restore: native
+-- BuffFrame_Update decides occupancy.
+local function SetAuraVisible(frame, visible)
+  if not frame then return end
+  if visible then
+    pcall(frame.SetAlpha, frame, 1)
+    if frame.EnableMouse then pcall(frame.EnableMouse, frame, true) end
+  else
+    pcall(frame.Hide, frame)
+    pcall(frame.SetAlpha, frame, 0)
+    if frame.EnableMouse then pcall(frame.EnableMouse, frame, false) end
+  end
+end
+
+local function EachNamed(prefix, count, visible)
+  local i
+  for i = 1, count do
+    SetAuraVisible(U.G(prefix .. i), visible)
+  end
+end
+
+local function ApplyMinimapAuraVisibility()
+  local cfg = MinimapCfg()
+  local showBuffs = cfg.showBuffs ~= false
+  local showDebuffs = cfg.showDebuffs ~= false
+
+  -- Debuff buttons can live under BuffFrame. Keep the parent up when either
+  -- row is on, and punch the individual buttons for the row that is off.
+  SetAuraVisible(U.G("BuffFrame"), showBuffs or showDebuffs)
+  SetAuraVisible(U.G("TemporaryEnchantFrame"), showBuffs)
+  EachNamed("TempEnchant", 2, showBuffs)
+  EachNamed("BuffButton", 32, showBuffs)
+  SetAuraVisible(U.G("DebuffFrame"), showDebuffs)
+  EachNamed("DebuffButton", 16, showDebuffs)
+
+  if showBuffs then
+    local buffs = U.G("BuffFrame")
+    if buffs then pcall(buffs.Show, buffs) end
+  end
+  if showDebuffs then
+    local row = U.G("DebuffFrame")
+    if not row then row = U.G("DebuffButton1") end
+    if row then pcall(row.Show, row) end
+  end
+
+  local update = U.G("BuffFrame_Update")
+  if type(update) == "function" and (showBuffs or showDebuffs) then
+    pcall(update)
+    -- Native update Show()s occupied buttons; re-punch the off row after.
+    if not showBuffs then
+      SetAuraVisible(U.G("TemporaryEnchantFrame"), false)
+      EachNamed("TempEnchant", 2, false)
+      EachNamed("BuffButton", 32, false)
+    end
+    if not showDebuffs then
+      SetAuraVisible(U.G("DebuffFrame"), false)
+      EachNamed("DebuffButton", 16, false)
+    end
+  end
+end
+U.ApplyMinimapAuras = ApplyMinimapAuraVisibility
 
 local function GlueMinimapAuras()
   if buffAnchor then
@@ -108,6 +180,7 @@ local function GlueMinimapAuras()
     if not row then row = U.G("DebuffButton1") end
     Glue(row, "TOPRIGHT", debuffAnchor, "TOPRIGHT", 0, 0)
   end
+  ApplyMinimapAuraVisibility()
 end
 
 local function RegisterMinimapAuraMovers()
@@ -150,10 +223,16 @@ local function RegisterMinimapAuraMovers()
   end)
   U.RegisterEvent("PLAYER_ENTERING_WORLD", QueueGlue)
 
-  local buffFrame = U.G("BuffFrame")
-  if buffFrame and type(U.PostHookScript) == "function" then
-    U.PostHookScript(buffFrame, "OnShow", QueueGlue)
+  local function HookShow(name)
+    local frame = U.G(name)
+    if frame and type(U.PostHookScript) == "function" then
+      U.PostHookScript(frame, "OnShow", QueueGlue)
+    end
   end
+  HookShow("BuffFrame")
+  HookShow("TemporaryEnchantFrame")
+  HookShow("DebuffFrame")
+  HookShow("DebuffButton1")
   if type(U.RegisterUpdate) == "function" then
     U.RegisterUpdate("minimap.aura-glue", 0.25, GlueMinimapAuras)
   end
@@ -166,7 +245,7 @@ local function Apply()
   local button = MM.button
   if not button then return end
 
-  if U.ModuleConfig("minimap", { enabled = true }).enabled then
+  if MinimapCfg().enabled then
     button:Show()
     if button.label then button.label:Show() end
   else

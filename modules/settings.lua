@@ -805,6 +805,43 @@ local function BuildGeneralPage(parent)
   minimapButton.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -188)
   table.insert(widgets, minimapButton)
 
+  local minimapBuffs = U.CreateCheckbox(parent, {
+    name = "QtUiPlusSettingsMinimapBuffs",
+    text = "Show minimap buffs",
+    value = U.ModuleConfig("minimap", { showBuffs = true }).showBuffs ~= false,
+    onChange = function(value)
+      U.ModuleConfig("minimap", { showBuffs = true }).showBuffs = value and true or false
+      if type(U.ApplyMinimapAuras) == "function" then U.ApplyMinimapAuras() end
+    end,
+  })
+  minimapBuffs.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -220)
+  table.insert(widgets, minimapBuffs)
+
+  local minimapDebuffs = U.CreateCheckbox(parent, {
+    name = "QtUiPlusSettingsMinimapDebuffs",
+    text = "Show minimap debuffs",
+    value = U.ModuleConfig("minimap", { showDebuffs = true }).showDebuffs ~= false,
+    onChange = function(value)
+      U.ModuleConfig("minimap", { showDebuffs = true }).showDebuffs = value and true or false
+      if type(U.ApplyMinimapAuras) == "function" then U.ApplyMinimapAuras() end
+    end,
+  })
+  minimapDebuffs.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -252)
+  table.insert(widgets, minimapDebuffs)
+
+  local auraHint = U.CreateSettingsLabel(parent, {
+    size = M.fontSize.small,
+    color = M.color.textDim,
+    inherits = "GameFontNormalSmall",
+    justify = "LEFT",
+  })
+  if auraHint then
+    U.AnchorSettingsDescription(auraHint, minimapDebuffs.box)
+    auraHint:SetText("The stock aura row next to the minimap. Player and " ..
+                     "target auras on the unit frames are unchanged.")
+    table.insert(widgets, auraHint)
+  end
+
   -- Grid pitch for edit mode (core/mover.lua). Lives here rather than on a
   -- page of its own: it is one slider, and it belongs with the Anchor Mode
   -- button that opens the mode it affects.
@@ -817,7 +854,7 @@ local function BuildGeneralPage(parent)
     value = U.GridSize(),
     onChange = function(value) U.SetGridSize(value) end,
   })
-  gridSlider.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -226)
+  gridSlider.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -310)
   table.insert(widgets, gridSlider)
 
   local padMin, padMax, padStep = 0, 80, 1
@@ -846,7 +883,7 @@ local function BuildGeneralPage(parent)
       end,
     })
     slider.SetPoint("TOPLEFT", parent, "TOPLEFT",
-                    spec.column * 258, -286 - spec.row * 44)
+                    spec.column * 258, -370 - spec.row * 44)
     padControls[spec.edge] = slider
     table.insert(widgets, slider)
   end
@@ -856,6 +893,8 @@ local function BuildGeneralPage(parent)
     microbar.SetValue(U.ModuleConfig("microbar", { enabled = true }).enabled)
     reputation.SetValue(U.ModuleConfig("xpbar", { repEnabled = true }).repEnabled)
     minimapButton.SetValue(U.ModuleConfig("minimap", { enabled = true }).enabled)
+    minimapBuffs.SetValue(U.ModuleConfig("minimap", { showBuffs = true }).showBuffs ~= false)
+    minimapDebuffs.SetValue(U.ModuleConfig("minimap", { showDebuffs = true }).showDebuffs ~= false)
     local edge, slider
     for edge, slider in pairs(padControls) do
       if type(U.GetSnapPad) == "function" then
