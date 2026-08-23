@@ -609,7 +609,11 @@ local function Build()
 
   frame = U.CreatePanel(anchor, { name = "QtUiPlusBankFrame" })
   frame:SetAllPoints(anchor)
-  pcall(frame.SetFrameStrata, frame, "MEDIUM")
+  pcall(frame.SetFrameStrata, frame, "DIALOG")
+  pcall(frame.SetToplevel, frame, true)
+  if type(U.KeepPanelInFront) == "function" then
+    U.KeepPanelInFront(frame, "DIALOG")
+  end
   pcall(frame.EnableMouse, frame, true)
   frame:Hide()
 

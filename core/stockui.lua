@@ -893,3 +893,31 @@ function U.SetStockCollapseState(button, shown, collapsed)
   icon:Show()
   return true
 end
+
+-- ---------------------------------------------------------------------------
+-- Game panels in front of the HUD
+--
+-- Unit frames, bars and auras sit on LOW/MEDIUM. Native and QtUiPlus windows
+-- (paperdoll, bags, quest log, loot) must open above that. QtUI did this with
+-- DIALOG + SetToplevel + Raise on every show; loot is HIGH so a corpse window
+-- is never covered by an open bag or character sheet.
+-- ---------------------------------------------------------------------------
+function U.RaiseGamePanel(frame, strata)
+  if not frame then return false end
+  strata = strata or "DIALOG"
+  pcall(frame.SetFrameStrata, frame, strata)
+  pcall(frame.SetToplevel, frame, true)
+  pcall(frame.Raise, frame)
+  return true
+end
+
+function U.KeepPanelInFront(frame, strata)
+  if not frame or frame.qtpPanelRaised then return false end
+  frame.qtpPanelRaised = true
+  U.PostHookScript(frame, "OnShow", function()
+    U.RaiseGamePanel(frame, strata)
+  end)
+  local ok, shown = pcall(frame.IsShown, frame)
+  if ok and shown then U.RaiseGamePanel(frame, strata) end
+  return true
+end
