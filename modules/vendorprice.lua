@@ -30,6 +30,21 @@ local VP = U.RegisterModule("vendorprice")
 local hooked = false
 local adding = false
 
+-- Instrumentation for /qtp price. Guessing at why a tooltip line does not
+-- appear has already cost one wrong fix; these counters make the failure point
+-- observable instead.
+local diag = {
+  hookedMethods = {},
+  setterCalls = 0,
+  lookups = 0,
+  linesAdded = 0,
+  lastLink = nil,
+  lastPrice = nil,
+  lastError = nil,
+}
+
+QtP.vendorPriceDiag = diag
+
 local function Enabled()
   local layout = QtP:GetLayout()
   return layout and layout.vendorPrices ~= false
@@ -56,10 +71,21 @@ end
 local function AddPriceLine(tooltip, link, count)
   if adding or not tooltip or not link then return end
   if not Enabled() then return end
-  if type(tooltip.AddDoubleLine) ~= "function" then return end
+
+  if type(tooltip.AddDoubleLine) ~= "function" then
+    diag.lastError = "GameTooltip has no AddDoubleLine"
+    return
+  end
+
+  diag.lookups = diag.lookups + 1
+  diag.lastLink = link
 
   local unit = QtP.VendorSellPrice(link)
-  if not unit or unit <= 0 then return end
+  diag.lastPrice = unit
+  if not unit or unit <= 0 then
+    diag.lastError = "no price for this item"
+    return
+  end
 
   count = tonumber(count) or 1
   if count < 1 then count = 1 end
@@ -68,10 +94,35 @@ local function AddPriceLine(tooltip, link, count)
 
   local label = "Sell"
   if count > 1 then label = "Sell (" .. count .. ")" end
-  pcall(tooltip.AddDoubleLine, tooltip, label, FormatMoney(unit * count),
-        M.Unpack(M.color.textDim))
-  -- The frame is already sized to the lines it had; Show() re-measures it.
-  pcall(tooltip.Show, tooltip)
+
+  -- AddDoubleLine is documented as
+  --   AddDoubleLine(leftText, rightText, lR, lG, lB, rR, rG, rB)
+  -- -- six separate colour numbers, three per side. The previous version
+  -- passed M.Unpack(...), which returns FOUR values (r, g, b, a): the alpha
+  -- landed in lR's right-hand counterpart with no rG/rB behind it, producing a
+  -- malformed call that a pcall then swallowed silently. Both sides now get
+  -- three explicit numbers, and the alpha is dropped -- this call has no
+  -- parameter for it.
+  local lr, lg, lb = M.Unpack(M.color.textDim)
+  local rr, rg, rb = M.Unpack(M.color.text)
+
+  local ok, err = pcall(tooltip.AddDoubleLine, tooltip,
+                        label, FormatMoney(unit * count),
+                        lr, lg, lb, rr, rg, rb)
+  if ok then
+    diag.linesAdded = diag.linesAdded + 1
+    diag.lastError = nil
+  else
+    diag.lastError = "AddDoubleLine: " .. tostring(err)
+  end
+
+  -- The frame was sized to the lines it had before this one, so it has to be
+  -- re-measured or the new line is laid out beyond the visible backdrop. Show
+  -- is the only re-measure this client documents.
+  if type(tooltip.Show) == "function" then
+    local showOk, showErr = pcall(tooltip.Show, tooltip)
+    if not showOk then diag.lastError = "Show: " .. tostring(showErr) end
+  end
 
   adding = false
 end
@@ -88,10 +139,17 @@ local function HookMethod(tooltip, name, resolve)
 
   tooltip[name] = function(self, a, b, c)
     local r1, r2, r3 = original(self, a, b, c)
+    diag.setterCalls = diag.setterCalls + 1
     local ok, link, count = pcall(resolve, a, b, c)
-    if ok and link then AddPriceLine(self, link, count) end
+    if ok and link then
+      AddPriceLine(self, link, count)
+    elseif not ok then
+      diag.lastError = "resolve " .. name .. ": " .. tostring(link)
+    end
     return r1, r2, r3
   end
+
+  table.insert(diag.hookedMethods, name)
 end
 
 local function InstallHooks()
@@ -100,19 +158,19 @@ local function InstallHooks()
   if not tooltip then return end
   hooked = true
 
-  -- Bags, the bank and the keyring. bag/slot -> link plus the stack size.
-  HookMethod(tooltip, "SetBagItem", function(bag, slot)
-    local link = U.G("GetContainerItemLink")
-    local info = U.G("GetContainerItemInfo")
-    if type(link) ~= "function" then return nil end
-
-    local count
-    if type(info) == "function" then
-      local ok, _, stack = pcall(info, bag, slot)
-      if ok then count = stack end
-    end
-    return link(bag, slot), count
-  end)
+  -- SetBagItem is deliberately NOT hooked.
+  --
+  -- Replacing a method on the GameTooltip table only intercepts callers that
+  -- go through Lua. The stock bag-button OnEnter on this client is not
+  -- guaranteed to: a reimplemented client can fill the tooltip natively, in
+  -- which case the Lua method is never consulted and the hook silently never
+  -- runs -- which is exactly the symptom that was reported.
+  --
+  -- QtUiPlus builds its own bag and bank slot buttons (core/itemslot.lua), so
+  -- the price for those is added from their OnEnter through
+  -- QtP.AddVendorPriceForSlot below. That path is ours end to end and does not
+  -- depend on how the client fills the tooltip. The setters below stay hooked
+  -- because there is no QtUiPlus-owned button behind them.
 
   -- Equipped items. Always a single item, never a stack.
   HookMethod(tooltip, "SetInventoryItem", function(unit, slot)
@@ -139,6 +197,31 @@ local function InstallHooks()
     end
     return link(slot), count
   end)
+end
+
+-- Called from core/itemslot.lua's OnEnter post-hook, after the stock handler
+-- has filled the tooltip. Resolves the item from the slot itself rather than
+-- from tooltip text.
+function QtP.AddVendorPriceForSlot(bag, slot)
+  local tooltip = U.G("GameTooltip")
+  if not tooltip then return end
+  if not tooltip.IsVisible or not tooltip:IsVisible() then return end
+
+  local getLink = U.G("GetContainerItemLink")
+  local getInfo = U.G("GetContainerItemInfo")
+  if type(getLink) ~= "function" then return end
+
+  local ok, link = pcall(getLink, bag, slot)
+  if not ok or not link then return end
+
+  local count
+  if type(getInfo) == "function" then
+    local infoOk, _, stack = pcall(getInfo, bag, slot)
+    if infoOk then count = stack end
+  end
+
+  diag.setterCalls = diag.setterCalls + 1
+  AddPriceLine(tooltip, link, count)
 end
 
 function VP:OnEnable()

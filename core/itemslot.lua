@@ -172,6 +172,25 @@ function U.CreateItemSlot(parent, name, bag, slot)
     end)
   end
 
+  -- Vendor price line (modules/vendorprice.lua).
+  --
+  -- Post-hooked onto this button's own OnEnter rather than onto
+  -- GameTooltip:SetBagItem. Replacing a method on the tooltip only intercepts
+  -- callers that go through Lua, and the stock item-button handler on this
+  -- client is not guaranteed to -- a natively filled tooltip never consults
+  -- the Lua method, so the hook silently never runs. This button is ours, so
+  -- its OnEnter always fires, and the bag/slot identity is captured here
+  -- instead of being recovered from tooltip text.
+  --
+  -- The stock OnEnter is left intact and runs first; this only appends.
+  if type(U.PostHookScript) == "function" then
+    U.PostHookScript(button, "OnEnter", function()
+      if type(QtP) == "table" and type(QtP.AddVendorPriceForSlot) == "function" then
+        QtP.AddVendorPriceForSlot(bag, slot)
+      end
+    end)
+  end
+
   return button
 end
 

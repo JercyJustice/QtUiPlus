@@ -104,6 +104,7 @@ local function ShowHelp()
   U.Print("  |cffffff00/qtp suppress <0-4>|r - bisect the suppression recipe (needs /reload)")
   U.Print("  |cffffff00/qtp debug|r - toggle debug output")
   U.Print("  |cffffff00/qtp frames <text>|r - find stock frames whose name contains <text>")
+  U.Print("  |cffffff00/qtp price|r - why a vendor price is or is not on tooltips")
   U.Print("  |cffffff00/qtp profile|r - list, save, load or delete a layout profile")
   U.Print("  |cffffff00/qtp meter|r - show, hide, add or close a damage meter window")
 end
@@ -1387,6 +1388,68 @@ handlers["frames"] = function(rest)
   end
   U.Print("  |cffff5555SHOWN|r on a frame QtUiPlus should be hiding means the " ..
           "suppression list has the wrong name for it.")
+end
+
+-- ---------------------------------------------------------------------------
+-- Vendor price diagnostic (modules/vendorprice.lua).
+--
+-- Reports each stage separately, because "no price on the tooltip" has at
+-- least four distinct causes and they need different fixes: the hooks never
+-- installed, the client never calls the hooked setter, the item has no row in
+-- the table, or the AddDoubleLine call itself failed.
+-- ---------------------------------------------------------------------------
+handlers["price"] = function()
+  local diag = QtP and QtP.vendorPriceDiag
+  if not diag then
+    U.Print("vendor price module is not loaded")
+    return
+  end
+
+  local layout = QtP:GetLayout()
+  U.Print("vendor prices: " ..
+          ((layout and layout.vendorPrices ~= false) and "|cff55ff55on|r"
+                                                     or "|cffff5555off|r"))
+
+  local methods = table.concat(diag.hookedMethods, ", ")
+  if methods == "" then methods = "|cffff5555none|r" end
+  U.Print("  hooked: " .. methods)
+  U.Print("  setter calls seen: |cffffff00" .. diag.setterCalls .. "|r" ..
+          "   price lookups: |cffffff00" .. diag.lookups .. "|r" ..
+          "   lines added: |cffffff00" .. diag.linesAdded .. "|r")
+
+  if diag.lastLink then
+    U.Print("  last item: " .. tostring(diag.lastLink))
+    U.Print("  last price: " .. tostring(diag.lastPrice))
+  end
+  if diag.lastError then
+    U.Print("  last error: |cffff5555" .. tostring(diag.lastError) .. "|r")
+  end
+
+  -- A direct lookup against the first occupied backpack slot, independent of
+  -- the tooltip path: this separates "the table has no row" from "the tooltip
+  -- never asked".
+  local getLink = U.G("GetContainerItemLink")
+  local numSlots = U.G("GetContainerNumSlots")
+  if type(getLink) == "function" and type(numSlots) == "function" then
+    local ok, slots = pcall(numSlots, 0)
+    slots = (ok and tonumber(slots)) or 0
+    local i
+    for i = 1, slots do
+      local linkOk, link = pcall(getLink, 0, i)
+      if linkOk and link then
+        U.Print("  backpack slot " .. i .. ": " .. link)
+        U.Print("    table price: |cffffff00" ..
+                tostring(QtP.VendorSellPrice(link)) .. "|r copper")
+        break
+      end
+    end
+  end
+
+  if diag.setterCalls == 0 then
+    U.Print("  |cffff5555No setter has fired.|r Hover a bag item, then run " ..
+            "this again. If it stays 0, this client fills bag tooltips " ..
+            "through something other than GameTooltip:SetBagItem.")
+  end
 end
 
 -- ---------------------------------------------------------------------------
