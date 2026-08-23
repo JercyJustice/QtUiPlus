@@ -1513,7 +1513,7 @@ local COLOR_DEFAULTS = {
   -- covers everything the player does not control.
   classColorPlayers = false,
   reactionColors    = false,
-  -- QtUI "Gradient bars": vertical dark-to-light fill of the bar colour.
+  -- QtUI "Gradient bars": left-to-right dark-to-light fill of the bar colour.
   gradientBars      = true,
 }
 
@@ -1596,9 +1596,9 @@ local function HealthColorFor(frame)
   return HealthBaseColor()
 end
 
--- QtUI "Gradient bars": a vertical dark-to-light fill of the bar's own colour
--- plus an additive shine. Not a red/yellow/green HP mix -- that never showed
--- at full health (perc >= 1) and is not what the setting paints in QtUI.
+-- QtUI "Gradient bars": a left-to-right dark-to-light fill of the bar's own
+-- colour plus an additive shine. Not a red/yellow/green HP mix -- that never
+-- showed at full health (perc >= 1) and is not what the setting paints.
 local function ApplyHealthColor(frame)
   local cfg = ColorConfig()
   local r, g, b = HealthColorFor(frame)

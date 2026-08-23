@@ -311,12 +311,13 @@ function U.CreateStatusBar(parent, options)
   return bar
 end
 
--- QtUI PaintStatusBar: a vertical dark-to-light fill plus an additive shine.
+-- Unit-frame bars: a left-to-right dark-to-light fill plus an additive shine.
 -- Emberveil Texture has no SetGradient (wiki Texture page); SetGradientAlpha
--- is the documented substitute. VERTICAL interpolates top→bottom and replaces
--- a bound image with a coloured fill. SetVertexColor on a Texture writes the
--- texture colour (LayeredRegion wiki), so a leftover tint after CreateStatusBar
--- would flatten the gradient back to a solid — reset to white first.
+-- is the documented substitute. HORIZONTAL interpolates left→right and
+-- replaces a bound image with a coloured fill. SetVertexColor on a Texture
+-- writes the texture colour (LayeredRegion wiki), so a leftover tint after
+-- CreateStatusBar would flatten the gradient back to a solid — reset to white
+-- first.
 EnsureBarShine = function(bar, shown)
   local shine = bar.qtpShine
   if not shown then
@@ -342,8 +343,8 @@ EnsureBarShine = function(bar, shown)
   if not shine.qtpReady then
     pcall(shine.SetTexture, shine, M.texture.plain)
     U.SetColor(shine, 1, 1, 1, 1)
-    -- VERTICAL is top→bottom. White highlight at the top, fade to nothing.
-    pcall(shine.SetGradientAlpha, shine, "VERTICAL", 1, 1, 1, 0.28, 0, 0, 0, 0)
+    -- HORIZONTAL is left→right. White highlight at the left, fade to nothing.
+    pcall(shine.SetGradientAlpha, shine, "HORIZONTAL", 1, 1, 1, 0.28, 0, 0, 0, 0)
     shine.qtpReady = true
   end
   pcall(shine.SetAlpha, shine, 1)
@@ -367,10 +368,10 @@ function U.PaintStatusBar(bar, r, g, b, a, gradient)
   local painted = false
   if gradient then
     -- Re-bind the fill so a previous solid tint cannot stick, then paint the
-    -- gradient. Bright at the top, 38% of the same hue at the bottom (QtUI).
+    -- gradient. Bright at the left, 38% of the same hue at the right.
     pcall(fill.SetTexture, fill, M.texture.plain)
     U.SetColor(fill, 1, 1, 1, 1)
-    painted = pcall(fill.SetGradientAlpha, fill, "VERTICAL",
+    painted = pcall(fill.SetGradientAlpha, fill, "HORIZONTAL",
                     r, g, b, a, r * 0.38, g * 0.38, b * 0.38, a)
   end
 
