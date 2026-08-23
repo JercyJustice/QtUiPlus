@@ -113,6 +113,14 @@ local function StyleNativeButton(button)
   -- well as keeping the opaque cover above anything that is not enumerable.
   U.RefreshStockButtonArtwork(button)
   cover.label:SetText(NativeText(button))
+  -- Native button text draws on the button's own FontString layer and can
+  -- sit above the cover (Video/Sound/Interface ghost labels). Hide it after
+  -- NativeText has read the original string.
+  if button.GetFontString then
+    local nativeLabel
+    pcall(function() nativeLabel = button:GetFontString() end)
+    if nativeLabel then U.HideRegion(nativeLabel) end
+  end
 
   local enabled = true
   if button.IsEnabled then
@@ -342,6 +350,36 @@ local function BuildChrome(frame)
   title:SetPoint("TOP", chrome, "TOP", 0, -10)
 end
 
+-- Stock GameMenuFrame keeps a gold "Main Menu" FontString (often not the
+-- GameMenuFrameHeader texture). StripStockTextures only hides textures, so
+-- the title survived between QtUiPlus and Quick Binding.
+local function HideNativeTitle(frame)
+  local function HideFontStrings(owner)
+    if not owner or not owner.GetRegions then return end
+    pcall(function()
+      local regions = { owner:GetRegions() }
+      local i
+      for i = 1, table.getn(regions) do
+        local region = regions[i]
+        if region and region ~= title then
+          local ok, objectType = pcall(region.GetObjectType, region)
+          if ok and objectType == "FontString" then
+            pcall(region.SetText, region, "")
+            U.HideRegion(region)
+          end
+        end
+      end
+    end)
+  end
+
+  HideFontStrings(frame)
+  local header = U.G("GameMenuFrameHeader")
+  if header then
+    U.HideRegion(header)
+    HideFontStrings(header)
+  end
+end
+
 local function OnMenuShow()
   local frame = U.G("GameMenuFrame")
   if not frame then return end
@@ -354,8 +392,7 @@ local function OnMenuShow()
   -- The client can repaint stock regions when the menu opens. The opaque
   -- chrome and button covers are retained; this clears whatever is exposed.
   U.StripStockTextures(frame)
-  local header = U.G("GameMenuFrameHeader")
-  if header then U.HideRegion(header) end
+  HideNativeTitle(frame)
   Layout(frame)
 end
 
