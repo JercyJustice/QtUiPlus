@@ -2929,7 +2929,7 @@ local function TooltipOn(frame, lines)
   end)
 end
 
-local METER_ICON = "Interface\\AddOns\\QtP\\Media\\"
+local METER_ICON = "Interface\\AddOns\\QtUiPlus\\media\\"
 
 local function MakeMeterButton(parent, caption, lines, onClick, icon)
   local btn = CreateFrame("Button", nil, parent)

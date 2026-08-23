@@ -25,13 +25,14 @@ local COLUMN_X = 258
 local SLIDER_WIDTH = 200
 
 local SLIDERS = {
-  { key = "Buttons", text = "Buttons",         column = 0, row = 0 },
-  { key = "PerRow",  text = "Buttons Per Row", column = 1, row = 0 },
-  { key = "Size",    text = "Button Size",     column = 0, row = 1 },
-  { key = "Spacing", text = "Button Spacing",  column = 1, row = 1 },
+  { key = "Buttons",    text = "Buttons",         column = 0, row = 0 },
+  { key = "PerRow",     text = "Buttons Per Row", column = 1, row = 0 },
+  { key = "Size",       text = "Button Size",     column = 0, row = 1 },
+  { key = "Spacing",    text = "Button Spacing",  column = 1, row = 1 },
+  { key = "HotkeySize", text = "Hotkey Size",     column = 0, row = 2 },
 }
 
-local ROW_Y = { -104, -180 }
+local ROW_Y = { -104, -180, -256 }
 
 -- ---------------------------------------------------------------------------
 -- Bar pages
@@ -112,9 +113,41 @@ local function BuildBarPage(parent, bar)
     table.insert(widgets, slider)
   end
 
+  local hotkeyAlign = U.CreateCyclePicker(parent, {
+    name = "QtUiPlusActionBarConfigHotkeyAlign" .. bar,
+    text = "Hotkey",
+    width = SLIDER_WIDTH,
+    value = U.GetActionBarSetting(bar, "HotkeyAlign"),
+    values = U.ALIGN_OPTIONS,
+    onChange = function(value)
+      U.SetActionBarSetting(bar, "HotkeyAlign", value)
+    end,
+  })
+  hotkeyAlign.SetPoint("TOPLEFT", parent, "TOPLEFT", COLUMN_X, ROW_Y[3])
+  table.insert(widgets, hotkeyAlign)
+  controls.HotkeyAlign = hotkeyAlign
+
+  local applyAll = U.CreateButton(parent, {
+    name = "QtUiPlusActionBarConfigApplyAll" .. bar,
+    text = "Apply to all bars",
+    width = 200,
+    height = 22,
+    onClick = function()
+      if type(U.ApplyActionBarConfigToAll) == "function" then
+        U.ApplyActionBarConfigToAll(bar)
+        U.Print("Copied this bar's layout and hotkey settings to all bars.")
+      end
+    end,
+  })
+  applyAll:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -318)
+  table.insert(widgets, applyAll)
+
   local function Refresh()
     enable.SetValue(U.GetActionBarSetting(bar, "Enabled"))
     hideBackground.SetValue(U.GetActionBarSetting(bar, "HideBackground"))
+    if controls.HotkeyAlign then
+      controls.HotkeyAlign.SetValue(U.GetActionBarSetting(bar, "HotkeyAlign"))
+    end
 
     local j
     for j = 1, table.getn(SLIDERS) do
@@ -193,12 +226,14 @@ end
 -- option is listed here that QtUiPlus does not actually implement.
 -- ---------------------------------------------------------------------------
 local GLOBALS = {
-  { key = "showKeybind",  text = "Show keybinds" },
-  { key = "showMacro",    text = "Show macro names" },
-  { key = "showCount",    text = "Show item counts" },
-  { key = "showCooldown", text = "Show cooldown timers" },
-  { key = "showGCD",      text = "Show global cooldown wipe" },
-  { key = "rangeColor",   text = "Tint out-of-range abilities red" },
+  { key = "showKeybind",      text = "Show keybinds" },
+  { key = "showMacro",        text = "Show macro names" },
+  { key = "showCount",        text = "Show item counts" },
+  { key = "showCooldown",     text = "Show cooldown timers" },
+  { key = "showGCD",          text = "Show global cooldown wipe" },
+  { key = "rangeColor",       text = "Tint out-of-range abilities red" },
+  { key = "hideEmptySlots",   text = "Hide empty slots" },
+  { key = "showBarBackground", text = "Show action-bar background" },
 }
 
 local function BuildGeneralPage(parent)
@@ -230,6 +265,39 @@ local function BuildGeneralPage(parent)
     table.insert(widgets, check)
   end
 
+  local COLORS = {
+    { prefix = "slotBg",     text = "Slot background", column = 0, row = 0 },
+    { prefix = "slotBorder", text = "Slot border",     column = 1, row = 0 },
+    { prefix = "barBg",      text = "Bar background",  column = 0, row = 1 },
+    { prefix = "barBorder",  text = "Bar border",      column = 1, row = 1 },
+  }
+  local colorY = -34 - table.getn(GLOBALS) * 26 - 8
+  local c
+  for c = 1, table.getn(COLORS) do
+    local spec = COLORS[c]
+    local picker = U.CreateColorPicker(parent, {
+      name = "QtUiPlusActionBarConfigColor" .. spec.prefix,
+      text = spec.text,
+      textWidth = 140,
+      value = {
+        r = U.GetActionBarGlobal(spec.prefix .. "R"),
+        g = U.GetActionBarGlobal(spec.prefix .. "G"),
+        b = U.GetActionBarGlobal(spec.prefix .. "B"),
+        a = U.GetActionBarGlobal(spec.prefix .. "A"),
+      },
+      onChange = function(color)
+        U.SetActionBarGlobal(spec.prefix .. "R", color.r)
+        U.SetActionBarGlobal(spec.prefix .. "G", color.g)
+        U.SetActionBarGlobal(spec.prefix .. "B", color.b)
+        U.SetActionBarGlobal(spec.prefix .. "A", color.a)
+      end,
+    })
+    picker.SetPoint("TOPLEFT", parent, "TOPLEFT",
+                    spec.column * COLUMN_X, colorY - spec.row * 28)
+    controls[spec.prefix] = picker
+    table.insert(widgets, picker)
+  end
+
   local hint = U.CreateSettingsLabel(parent, {
     size = M.fontSize.small,
     color = M.color.textDim,
@@ -245,7 +313,7 @@ local function BuildGeneralPage(parent)
 
   -- Quick binding (modules/quickbind.lua) is a mode rather than a setting, so
   -- this is a launcher: the window closes and the mode takes the screen.
-  local bindY = -34 - table.getn(GLOBALS) * 26 - 34
+  local bindY = -34 - table.getn(GLOBALS) * 26 - 8 - 56 - 40
 
   local quickbind = U.CreateButton(parent, {
     name = "QtUiPlusActionBarConfigQuickBind",
@@ -283,6 +351,17 @@ local function BuildGeneralPage(parent)
     for j = 1, table.getn(GLOBALS) do
       local key = GLOBALS[j].key
       if controls[key] then controls[key].SetValue(U.GetActionBarGlobal(key)) end
+    end
+    for j = 1, table.getn(COLORS) do
+      local prefix = COLORS[j].prefix
+      if controls[prefix] then
+        controls[prefix].SetValue({
+          r = U.GetActionBarGlobal(prefix .. "R"),
+          g = U.GetActionBarGlobal(prefix .. "G"),
+          b = U.GetActionBarGlobal(prefix .. "B"),
+          a = U.GetActionBarGlobal(prefix .. "A"),
+        })
+      end
     end
   end
 

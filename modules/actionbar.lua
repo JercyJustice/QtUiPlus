@@ -99,6 +99,14 @@ local LIMITS = {
   -- Negative spacing is deliberate: pfUI allows it so neighbouring outlines can
   -- overlap into a single line, and the reference layout offers -3 as well.
   Spacing = { min = -3, max = 20, step = 1 },
+  HotkeySize = { min = 7, max = 16, step = 1 },
+}
+
+local ALIGN_VALID = {
+  left = true, center = true, right = true,
+  top = true, bottom = true,
+  topleft = true, topright = true,
+  bottomleft = true, bottomright = true,
 }
 
 -- Label toggles that apply to every bar at once. Kept flat and separate from
@@ -113,6 +121,12 @@ local GLOBAL_DEFAULTS = {
   -- called this barRangeColor and let it be switched off, because the tint
   -- fights a class that is meant to be at range most of the time.
   rangeColor   = true,
+  hideEmptySlots = true,
+  showBarBackground = false,
+  slotBgR = 0.02, slotBgG = 0.025, slotBgB = 0.03, slotBgA = 0.96,
+  slotBorderR = 0.16, slotBorderG = 0.16, slotBorderB = 0.16, slotBorderA = 1,
+  barBgR = 0.025, barBgG = 0.035, barBgB = 0.045, barBgA = 0.85,
+  barBorderR = 0.16, barBorderG = 0.16, barBorderB = 0.16, barBorderA = 1,
 }
 
 -- Native binding names for the slot ranges the stock UI owns. Bar 6 and any
@@ -213,6 +227,8 @@ local function BuildDefaults()
     defaults[Key(i, "PerRow")]  = 12
     defaults[Key(i, "Size")]    = 30
     defaults[Key(i, "Spacing")] = 2
+    defaults[Key(i, "HotkeySize")] = 10
+    defaults[Key(i, "HotkeyAlign")] = "topright"
   end
   return defaults
 end
@@ -561,6 +577,18 @@ local function ButtonSlot(button)
   return SlotFor(button.qtpBar, button.qtpIndex)
 end
 
+local function SlotBorderColor()
+  if not cfg then return M.Unpack(M.color.border) end
+  return cfg.slotBorderR or 0.16, cfg.slotBorderG or 0.16,
+         cfg.slotBorderB or 0.16, cfg.slotBorderA or 1
+end
+
+local function SlotBgColor()
+  if not cfg then return M.Unpack(M.color.background) end
+  return cfg.slotBgR or 0.02, cfg.slotBgG or 0.025,
+         cfg.slotBgB or 0.03, cfg.slotBgA or 0.96
+end
+
 local function ApplyButtonBorder(button)
   if button.qtpPressedShown then
     U.SetBorderColor(button, 1, 1, 1, 1)
@@ -569,7 +597,7 @@ local function ApplyButtonBorder(button)
   elseif button.qtpHover then
     U.SetBorderColor(button, 0.55, 0.55, 0.55, 1)
   else
-    U.SetBorderColor(button, M.Unpack(M.color.border))
+    U.SetBorderColor(button, SlotBorderColor())
   end
 end
 
@@ -984,9 +1012,12 @@ local function SizeButton(button, size)
   if small > 14 then small = 14 end
 
   if button.qtpKeybind then
-    button.qtpKeybind:ClearAllPoints()
-    button.qtpKeybind:SetPoint("TOPRIGHT", button, "TOPRIGHT", -2, -2)
-    U.SetFont(button.qtpKeybind, small)
+    local hotSize = Number(button.qtpBar, "HotkeySize")
+    if not hotSize then hotSize = small end
+    local align = Get(button.qtpBar, "HotkeyAlign") or "topright"
+    if not ALIGN_VALID[align] then align = "topright" end
+    U.PlaceAligned(button.qtpKeybind, button, align, 2)
+    U.SetFont(button.qtpKeybind, hotSize)
   end
   if button.qtpCount then
     button.qtpCount:ClearAllPoints()
@@ -1320,8 +1351,26 @@ end
 -- suspended for the duration of the pickup, the same way the native grid
 -- would show, and restored once gridActive drops.
 local function ApplyButtonBackground(button)
+  local conceal = cfg and cfg.hideEmptySlots and button.qtpEmpty
+                  and not gridActive
+                  and not (U.IsUnlocked and U.IsUnlocked())
+  if conceal then
+    U.SetBackdropShown(button, false)
+    ShowRegion(button.qtpIcon, false)
+    ShowRegion(button.qtpKeybind, false)
+    ShowRegion(button.qtpCount, false)
+    ShowRegion(button.qtpMacro, false)
+    pcall(button.Show, button)
+    pcall(button.EnableMouse, button, true)
+    return
+  end
+
   local shown = gridActive or not (HidesBackground(button.qtpBar) and button.qtpEmpty)
   U.SetBackdropShown(button, shown)
+  if shown then
+    U.SetBackgroundColor(button, SlotBgColor())
+    ApplyButtonBorder(button)
+  end
   -- A keybind label floating over a background-less slot is the same "empty
   -- box" the setting is meant to remove, so it goes with the background.
   if not shown and button.qtpKeybind then
@@ -1500,6 +1549,22 @@ local function LayoutBar(bar)
 
   entry.shown = enabled
   if enabled then entry.frame:Show() else entry.frame:Hide() end
+
+  if cfg and cfg.showBarBackground then
+    if not entry.qtpBarChrome then
+      U.CreateBackdrop(entry.frame, {})
+      entry.qtpBarChrome = true
+    end
+    U.SetBackdropShown(entry.frame, true)
+    U.SetBackgroundColor(entry.frame,
+      cfg.barBgR or 0.025, cfg.barBgG or 0.035,
+      cfg.barBgB or 0.045, cfg.barBgA or 0.85)
+    U.SetBorderColor(entry.frame,
+      cfg.barBorderR or 0.16, cfg.barBorderG or 0.16,
+      cfg.barBorderB or 0.16, cfg.barBorderA or 1)
+  elseif entry.qtpBarChrome then
+    U.SetBackdropShown(entry.frame, false)
+  end
 end
 
 -- Creates the bar on first use, so a bar nobody enables costs nothing.
@@ -1554,12 +1619,24 @@ end
 -- a change re-lays out all of them.
 function U.GetActionBarGlobal(name)
   if not cfg or GLOBAL_DEFAULTS[name] == nil then return nil end
-  return cfg[name] and true or false
+  local default = GLOBAL_DEFAULTS[name]
+  if type(default) == "boolean" then
+    return cfg[name] and true or false
+  end
+  if cfg[name] == nil then return default end
+  return cfg[name]
 end
 
 function U.SetActionBarGlobal(name, value)
   if not cfg or GLOBAL_DEFAULTS[name] == nil then return nil end
-  cfg[name] = value and true or false
+  local default = GLOBAL_DEFAULTS[name]
+  if type(default) == "boolean" then
+    cfg[name] = value and true or false
+  elseif type(default) == "number" then
+    cfg[name] = tonumber(value) or default
+  else
+    cfg[name] = value
+  end
   ApplyAll()
   return cfg[name]
 end
@@ -1570,6 +1647,11 @@ function U.GetActionBarSetting(bar, name)
      not cfg then return nil end
   if name == "Enabled" then return IsEnabled(bar) end
   if name == "HideBackground" then return HidesBackground(bar) end
+  if name == "HotkeyAlign" then
+    local align = Get(bar, "HotkeyAlign") or "topright"
+    if not ALIGN_VALID[align] then align = "topright" end
+    return align
+  end
   return Number(bar, name)
 end
 
@@ -1584,6 +1666,9 @@ function U.SetActionBarSetting(bar, name, value)
     cfg[Key(bar, "Enabled")] = value and true or false
   elseif name == "HideBackground" then
     cfg[Key(bar, "HideBackground")] = value and true or false
+  elseif name == "HotkeyAlign" then
+    if not ALIGN_VALID[value] then value = "topright" end
+    cfg[Key(bar, "HotkeyAlign")] = value
   else
     if not LIMITS[name] then return nil end
     cfg[Key(bar, name)] = Clamp(name, value)
@@ -1591,6 +1676,23 @@ function U.SetActionBarSetting(bar, name, value)
 
   ApplyBar(bar)
   return U.GetActionBarSetting(bar, name)
+end
+
+function U.ApplyActionBarConfigToAll(sourceBar)
+  sourceBar = tonumber(sourceBar)
+  if not sourceBar then return false end
+  local keys = { "Size", "Spacing", "PerRow", "Buttons",
+                 "HideBackground", "HotkeySize", "HotkeyAlign" }
+  local i, k
+  for i = 1, BAR_COUNT do
+    if i ~= sourceBar and not reservedPages[i] then
+      for k = 1, table.getn(keys) do
+        local name = keys[k]
+        U.SetActionBarSetting(i, name, U.GetActionBarSetting(sourceBar, name))
+      end
+    end
+  end
+  return true
 end
 
 -- ---------------------------------------------------------------------------

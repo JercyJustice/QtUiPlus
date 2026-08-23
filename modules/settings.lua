@@ -22,7 +22,7 @@ local M = U.media
 local S = U.RegisterModule("settings")
 
 local PANEL_WIDTH = 700
-local PANEL_HEIGHT = 520
+local PANEL_HEIGHT = 600
 local SIDEBAR_WIDTH = 168
 local ROW_HEIGHT = 18
 local ROW_GAP = 1
@@ -709,11 +709,48 @@ local function BuildGeneralPage(parent)
   gridSlider.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -330)
   table.insert(widgets, gridSlider)
 
+  local padMin, padMax, padStep = 0, 80, 1
+  if type(U.SnapPadLimits) == "function" then
+    padMin, padMax, padStep = U.SnapPadLimits()
+  end
+
+  local PAD_SLIDERS = {
+    { edge = "left",   text = "Snap Inset Left",   column = 0, row = 0 },
+    { edge = "right",  text = "Snap Inset Right",  column = 1, row = 0 },
+    { edge = "bottom", text = "Snap Inset Bottom", column = 0, row = 1 },
+    { edge = "top",    text = "Snap Inset Top",    column = 1, row = 1 },
+  }
+  local padControls = {}
+  local p
+  for p = 1, table.getn(PAD_SLIDERS) do
+    local spec = PAD_SLIDERS[p]
+    local slider = U.CreateSlider(parent, {
+      name = "QtUiPlusSettingsSnapPad" .. spec.edge,
+      text = spec.text,
+      width = 200,
+      min = padMin, max = padMax, step = padStep,
+      value = type(U.GetSnapPad) == "function" and U.GetSnapPad(spec.edge) or 0,
+      onChange = function(value)
+        if type(U.SetSnapPad) == "function" then U.SetSnapPad(spec.edge, value) end
+      end,
+    })
+    slider.SetPoint("TOPLEFT", parent, "TOPLEFT",
+                    spec.column * 258, -390 - spec.row * 44)
+    padControls[spec.edge] = slider
+    table.insert(widgets, slider)
+  end
+
   local function Refresh()
     gridSlider.SetValue(U.GridSize())
     microbar.SetValue(U.ModuleConfig("microbar", { enabled = true }).enabled)
     reputation.SetValue(U.ModuleConfig("xpbar", { repEnabled = true }).repEnabled)
     minimapButton.SetValue(U.ModuleConfig("minimap", { enabled = true }).enabled)
+    local edge, slider
+    for edge, slider in pairs(padControls) do
+      if type(U.GetSnapPad) == "function" then
+        slider.SetValue(U.GetSnapPad(edge))
+      end
+    end
   end
 
   return widgets, Refresh

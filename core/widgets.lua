@@ -231,6 +231,91 @@ function U.CreateCheckbox(parent, options)
 end
 
 -- ---------------------------------------------------------------------------
+-- Cycle picker
+--
+-- Compact stand-in for a dropdown on this client (native ColorSelect is
+-- already broken; UIDropDownMenu is not used for addon settings). Click
+-- advances through options.values = { { key, label }, ... }.
+-- ---------------------------------------------------------------------------
+function U.CreateCyclePicker(parent, options)
+  options = options or {}
+
+  local width = options.width or 200
+  local height = options.height or 20
+  local choices = options.values or options.options or {}
+  local control = { values = choices }
+
+  local button = U.CreateButton(parent, {
+    name = options.name,
+    text = "",
+    width = width,
+    height = height,
+    size = M.fontSize.small,
+    onClick = function()
+      local n = table.getn(control.values)
+      if n < 1 then return end
+      local i = control.index or 1
+      i = i + 1
+      if i > n then i = 1 end
+      control.index = i
+      control.Apply()
+      if type(options.onChange) == "function" then
+        options.onChange(control.values[i].key)
+      end
+    end,
+  })
+  Part(control, button)
+  control.button = button
+
+  local caption = U.CreateSettingsLabel(parent, {
+    size = M.fontSize.small,
+    color = M.color.accent,
+    inherits = "GameFontNormalSmall",
+    width = width,
+    height = 14,
+  })
+  Part(control, caption)
+  control.caption = caption
+  if caption then caption:SetText(options.text or "") end
+
+  local function IndexOf(key)
+    local i
+    for i = 1, table.getn(control.values) do
+      if control.values[i].key == key then return i end
+    end
+    return 1
+  end
+
+  control.Apply = function()
+    local spec = control.values[control.index or 1]
+    local text = (spec and spec.label) or ""
+    if button.label then pcall(button.label.SetText, button.label, text) end
+  end
+
+  control.SetValue = function(key)
+    control.index = IndexOf(key)
+    control.Apply()
+  end
+
+  control.GetValue = function()
+    local spec = control.values[control.index or 1]
+    return spec and spec.key or nil
+  end
+
+  control.SetPoint = function(point, relative, relativePoint, x, y)
+    button:ClearAllPoints()
+    button:SetPoint(point, relative, relativePoint, x, y)
+    if caption then
+      caption:ClearAllPoints()
+      caption:SetPoint("BOTTOMLEFT", button, "TOPLEFT", 0, 2)
+    end
+  end
+
+  control.SetValue(options.value)
+  return control
+end
+
+-- ---------------------------------------------------------------------------
 -- Color picker
 --
 -- A small swatch button plus its own label, in the same shape as
@@ -1393,6 +1478,53 @@ function U.HidePricePanel()
 end
 
 -- ---------------------------------------------------------------------------
+-- Close button
+--
+-- QtUI's bag/bank close: a 16px texture button (close_normal / close_pushed)
+-- without a boxed backdrop. Hover tints the glyph; the pushed texture is the
+-- click feedback. Used by bags and bank so those windows match QtUI.
+-- ---------------------------------------------------------------------------
+function U.CreateCloseButton(parent, options)
+  options = options or {}
+  local size = options.size or M.slot.icon
+
+  local button = CreateFrame("Button", options.name, parent or UIParent)
+  button:SetWidth(size)
+  button:SetHeight(size)
+  pcall(button.EnableMouse, button, true)
+  pcall(button.RegisterForClicks, button, "LeftButtonUp")
+
+  if parent and parent.GetFrameLevel then
+    local ok, level = pcall(parent.GetFrameLevel, parent)
+    if ok and tonumber(level) then
+      pcall(button.SetFrameLevel, button, tonumber(level) + 10)
+    end
+  end
+
+  pcall(button.SetNormalTexture, button, M.texture.closeNormal)
+  pcall(button.SetPushedTexture, button, M.texture.closePushed)
+
+  button:SetScript("OnEnter", function()
+    local ok, tex = pcall(button.GetNormalTexture, button)
+    if ok and tex and tex.SetVertexColor then
+      pcall(tex.SetVertexColor, tex, M.Unpack(M.color.accent))
+    end
+  end)
+  button:SetScript("OnLeave", function()
+    local ok, tex = pcall(button.GetNormalTexture, button)
+    if ok and tex and tex.SetVertexColor then
+      pcall(tex.SetVertexColor, tex, 1, 1, 1, 1)
+    end
+  end)
+
+  if type(options.onClick) == "function" then
+    button:SetScript("OnClick", options.onClick)
+  end
+
+  return button
+end
+
+-- ---------------------------------------------------------------------------
 -- Icon buttons
 --
 -- A small square button with a stock icon inset inside the QtUiPlus border,
@@ -1461,7 +1593,7 @@ end
 -- ---------------------------------------------------------------------------
 -- Confirmation dialog
 --
--- One shared modal for "are you sure" actions (delete greys, buy a bank slot).
+-- One shared modal for "are you sure" actions (buy a bank slot).
 -- An owned panel rather than StaticPopup: query_compat.py has no record of
 -- StaticPopupDialogs/StaticPopup_Show on this client at all, and this needs
 -- only a line of text, an optional detail line and two buttons, all of which

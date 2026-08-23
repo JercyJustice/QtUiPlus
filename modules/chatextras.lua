@@ -19,9 +19,8 @@
 --    has to be repeated INSIDE the visible link text, as a full 8-digit code,
 --    or the name renders in the default link colour.
 --
--- Class colours come from core/media.lua's M.ClassColor, which already prefers
--- the client's RAID_CLASS_COLORS and falls back to its own table -- this file
--- does not carry a second copy of the palette.
+-- Class colours come from core/media.lua's M.ClassColor (QtUI's palette).
+-- This file does not carry a second copy of the palette.
 
 local U = QtUiPlus
 local M = U.media

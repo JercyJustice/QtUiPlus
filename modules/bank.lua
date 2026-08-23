@@ -523,12 +523,8 @@ end
 -- Build
 -- ---------------------------------------------------------------------------
 local function BuildHeader()
-  frame.close = U.CreateButton(frame, {
+  frame.close = U.CreateCloseButton(frame, {
     name = "QtUiPlusBankClose",
-    text = "X",
-    width = ICON_SIZE,
-    height = ICON_SIZE,
-    size = M.fontSize.small,
     onClick = CloseBank,
   })
   frame.close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -PADDING, -PADDING)

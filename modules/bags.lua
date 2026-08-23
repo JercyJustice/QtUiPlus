@@ -2,8 +2,8 @@
 --
 -- A single merged bag frame (backpack + the four carried bag slots) replacing
 -- the stock container windows, with a keyring row and a bag-slot row that each
--- toggle from the header, and a "Vendor / Delete Grays" action that sells
--- poor-quality items at an open vendor or asks to delete them otherwise.
+-- toggle from the header, and a "Sell Grays" action that sells poor-quality
+-- items while a merchant window is open.
 --
 -- knowledge.json / bags.container_api_contract_unverified is INCONCLUSIVE:
 -- GetContainerNumSlots, GetContainerItemInfo, GetContainerItemLink and
@@ -137,15 +137,15 @@ local function FormatCopper(amount)
 end
 
 -- ---------------------------------------------------------------------------
--- Sell (at an open vendor) / delete (everywhere else) queue.
+-- Sell greys at an open vendor.
 --
 -- One item per shared-driver tick rather than a tight loop: these calls drive
 -- the cursor, and UnrealPfUI's autovendor.lua -- the only working reference for
--- this on this client -- throttles the same way.
+-- this on this client -- throttles the same way. There is no delete path.
 -- ---------------------------------------------------------------------------
 local function ProcessPending()
   if not pending then
-    U.UnregisterUpdate("bags.sellDelete")
+    U.UnregisterUpdate("bags.sell")
     return
   end
 
@@ -153,18 +153,12 @@ local function ProcessPending()
   if not item then
     local count = pending.index - 1
     local plural = (count == 1 and "" or "s")
-
-    if pending.mode == "sell" then
-      local ok, endGold = pcall(GetMoney)
-      endGold = (ok and tonumber(endGold)) or pending.startGold
-      U.Print("Sold " .. count .. " grey item" .. plural .. " for " ..
-              FormatCopper(endGold - pending.startGold) .. ".")
-    else
-      U.Print("Deleted " .. count .. " grey item" .. plural .. ".")
-    end
-
+    local ok, endGold = pcall(GetMoney)
+    endGold = (ok and tonumber(endGold)) or pending.startGold
+    U.Print("Sold " .. count .. " grey item" .. plural .. " for " ..
+            FormatCopper(endGold - pending.startGold) .. ".")
     pending = nil
-    U.UnregisterUpdate("bags.sellDelete")
+    U.UnregisterUpdate("bags.sell")
     vendorDirty = true
     return
   end
@@ -176,43 +170,12 @@ local function ProcessPending()
     pcall(GetContainerItemInfo, item.bag, item.slot)
   if ok and texture and quality == 0 and not locked then
     pcall(ClearCursor)
-    if pending.mode == "sell" then
-      pcall(UseContainerItem, item.bag, item.slot)
-    else
-      pcall(PickupContainerItem, item.bag, item.slot)
-      pcall(DeleteCursorItem)
-    end
+    pcall(UseContainerItem, item.bag, item.slot)
   end
 end
 
--- ---------------------------------------------------------------------------
--- Delete confirmation
---
--- The shared modal from core/widgets.lua (U.ShowConfirm); this module owned a
--- private copy of it until the bank needed the same dialog.
--- ---------------------------------------------------------------------------
-local function ShowDeleteConfirm(items)
-  local n = table.getn(items)
-
-  U.ShowConfirm({
-    text = "Delete " .. n .. " grey item" .. (n == 1 and "" or "s") .. "?",
-    detail = "This cannot be undone.",
-    acceptText = "Delete",
-    onAccept = function()
-      pending = { items = items, index = 1, mode = "delete" }
-      U.RegisterUpdate("bags.sellDelete", 0.15, ProcessPending)
-    end,
-  })
-end
-
-local function SellOrDeleteGreys()
+local function SellGreys()
   if pending then return end
-
-  local items = CollectGreyItems()
-  if table.getn(items) == 0 then
-    U.Print("No grey items found.")
-    return
-  end
 
   local atVendor = false
   local merchant = U.G("MerchantFrame")
@@ -220,19 +183,24 @@ local function SellOrDeleteGreys()
     local ok, shown = pcall(merchant.IsShown, merchant)
     atVendor = ok and shown and true or false
   end
-
-  if atVendor then
-    local goldOk, goldNow = pcall(GetMoney)
-    pending = {
-      items = items,
-      index = 1,
-      mode = "sell",
-      startGold = (goldOk and tonumber(goldNow)) or 0,
-    }
-    U.RegisterUpdate("bags.sellDelete", 0.15, ProcessPending)
-  else
-    ShowDeleteConfirm(items)
+  if not atVendor then
+    U.Print("Open a vendor to sell grey items.")
+    return
   end
+
+  local items = CollectGreyItems()
+  if table.getn(items) == 0 then
+    U.Print("No grey items found.")
+    return
+  end
+
+  local goldOk, goldNow = pcall(GetMoney)
+  pending = {
+    items = items,
+    index = 1,
+    startGold = (goldOk and tonumber(goldNow)) or 0,
+  }
+  U.RegisterUpdate("bags.sell", 0.15, ProcessPending)
 end
 
 local function RefreshVendorButton()
@@ -667,12 +635,8 @@ local function BuildTray(name)
 end
 
 local function BuildHeader()
-  frame.close = U.CreateButton(frame, {
+  frame.close = U.CreateCloseButton(frame, {
     name = "QtUiPlusBagClose",
-    text = "X",
-    width = ICON_SIZE,
-    height = ICON_SIZE,
-    size = M.fontSize.small,
     onClick = function() HideBags() end,
   })
   frame.close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -PADDING, -PADDING)
@@ -724,12 +688,12 @@ local function BuildHeader()
     name = "QtUiPlusBagSell",
     texture = "Interface\\Icons\\INV_Misc_Coin_02",
     fallback = "$",
-    title = "Vendor / Delete Grays",
-    onClick = SellOrDeleteGreys,
+    title = "Sell Grays",
+    onClick = SellGreys,
     detail = function()
       local n = table.getn(CollectGreyItems())
       return n .. " grey item" .. (n == 1 and "" or "s") ..
-             " - sells at an open vendor, otherwise asks to delete."
+             " - sells at an open vendor."
     end,
   })
   frame.sell:SetPoint("LEFT", frame.bagsToggle, "RIGHT", 4, 0)

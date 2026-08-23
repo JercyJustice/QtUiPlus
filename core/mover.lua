@@ -3,12 +3,11 @@
 -- The shared mover system. Modules register the frames they want the user to
 -- be able to place; unlocking shows a drag handle over each one.
 --
--- Deliberately small. This is not pfUI's mover/config framework: there are no
--- grids, snapping, nudge keys, per-frame scale editing or profile machinery.
--- Only intended QtUiPlus elements are ever registered. modules/minimap.lua is
--- the one exception that registers a native frame (MinimapCluster) rather than
--- an QtUiPlus-owned one: the map itself is still never reskinned or replaced,
--- it is just given a drag handle like everything else here.
+-- Shared mover plus the QtUI-style INFO window (coordinates, 1px nudge,
+-- frame list). Only intended QtUiPlus elements are ever registered.
+-- modules/minimap.lua is the one exception that registers a native frame
+-- (MinimapCluster) rather than an QtUiPlus-owned one: the map itself is
+-- still never reskinned or replaced, it is just given a drag handle.
 
 local U = QtUiPlus
 local M = U.media
@@ -16,6 +15,8 @@ local M = U.media
 local movers = {}       -- id -> entry
 local moverOrder = {}
 local unlocked = false
+local selectedEntry
+local SelectEntry, PaintHandle, RefreshInfo, RefreshMoveList, ClampToInsets
 
 -- Edit-mode grid. Sized in UIParent units, which is the only space layout may
 -- be driven from (frames.json context: GetScreenWidth and UIParent:GetWidth are
@@ -25,16 +26,43 @@ local unlocked = false
 -- which is the same knob in a grid-based mover.
 local GRID_SIZE = 20
 local GRID_LIMITS = { min = 2, max = 40, step = 1 }
+local PAD_LIMITS = { min = 0, max = 80, step = 1 }
+local MOVER_DEFAULTS = {
+  gridSize = GRID_SIZE,
+  infoX = nil,
+  infoY = nil,
+  snapPadLeft = 0,
+  snapPadRight = 0,
+  snapPadTop = 0,
+  snapPadBottom = 0,
+}
 
 -- Read through a function rather than the constant so the setting takes effect
 -- on the next drop. The grid ARTWORK is built once, so changing this rebuilds
 -- it -- see U.SetGridSize.
+local function MoverCfg()
+  return U.ModuleConfig("mover", MOVER_DEFAULTS)
+end
+
 local function GridPitch()
-  local cfg = U.ModuleConfig("mover", { gridSize = GRID_SIZE })
+  local cfg = MoverCfg()
   local value = U.Round(tonumber(cfg.gridSize) or GRID_SIZE)
   if value < GRID_LIMITS.min then value = GRID_LIMITS.min end
   if value > GRID_LIMITS.max then value = GRID_LIMITS.max end
   return value
+end
+
+local function ClampPad(value)
+  value = U.Round(tonumber(value) or 0)
+  if value < PAD_LIMITS.min then value = PAD_LIMITS.min end
+  if value > PAD_LIMITS.max then value = PAD_LIMITS.max end
+  return value
+end
+
+local function SnapPads()
+  local cfg = MoverCfg()
+  return ClampPad(cfg.snapPadLeft), ClampPad(cfg.snapPadRight),
+         ClampPad(cfg.snapPadTop), ClampPad(cfg.snapPadBottom)
 end
 
 -- ---------------------------------------------------------------------------
@@ -186,6 +214,12 @@ local function StartDrag(entry)
   end
 
   entry.dragging = true
+  if SelectEntry then SelectEntry(entry) end
+  if type(U.RegisterUpdate) == "function" then
+    U.RegisterUpdate("mover.info", 0.05, function()
+      if RefreshInfo then RefreshInfo() end
+    end)
+  end
   return true
 end
 
@@ -194,7 +228,14 @@ local function StopDrag(entry)
   entry.dragging = false
 
   pcall(entry.frame.StopMovingOrSizing, entry.frame)
-  return CapturePosition(entry)
+  if type(U.UnregisterUpdate) == "function" then
+    U.UnregisterUpdate("mover.info")
+  end
+  local saved = CapturePosition(entry)
+  if not ShiftHeld() and ClampToInsets then ClampToInsets(entry) end
+  if SelectEntry then SelectEntry(entry) end
+  if RefreshInfo then RefreshInfo() end
+  return saved
 end
 
 -- ---------------------------------------------------------------------------
@@ -262,6 +303,10 @@ local function CreateHandle(entry)
     StopDrag(entry)
   end)
 
+  handle:SetScript("OnMouseDown", function()
+    SelectEntry(entry)
+  end)
+
   -- OnEnter is instrumentation as much as highlight: if the enter count stays
   -- at zero the client is not routing mouse input to the handle at all, which
   -- is a different failure from a drag that starts and does not move.
@@ -271,7 +316,7 @@ local function CreateHandle(entry)
   end)
 
   handle:SetScript("OnLeave", function()
-    U.SetBorderColor(handle, M.Unpack(M.color.moverEdge))
+    PaintHandle(entry)
   end)
 
   entry.handle = handle
@@ -375,61 +420,472 @@ local function CreateGrid()
   grid:Hide()
 end
 
--- The edit panel is the only way out of edit mode that does not need a slash
--- command. It is deliberately not registered as a mover: it belongs to the mode
--- rather than to the layout.
+-- ---------------------------------------------------------------------------
+-- INFO panel (QtUI anchor-mode readout)
+--
+-- Selected frame name + pixel coordinates, 1px nudge (Shift = 10), center,
+-- and a list of every registered mover. Not a mover itself; its position is
+-- stored under the mover module config.
+-- ---------------------------------------------------------------------------
+local INFO_W, INFO_H = 220, 196
+local LIST_W, LIST_H = 210, 280
+local LIST_ROWS = 36
+
+local function SetButtonCaption(btn, text)
+  if btn and btn.label then pcall(btn.label.SetText, btn.label, text) end
+end
+
+local function VisibleMovers()
+  local list, i = {}, nil
+  for i = 1, table.getn(moverOrder) do
+    local entry = movers[moverOrder[i]]
+    if entry and IsEntryVisible(entry) then
+      table.insert(list, entry)
+    end
+  end
+  return list
+end
+
+local function FrameLeftBottom(frame)
+  if not frame then return nil, nil end
+  local okL, left = pcall(frame.GetLeft, frame)
+  local okB, bottom = pcall(frame.GetBottom, frame)
+  if not (okL and okB) then return nil, nil end
+  return tonumber(left), tonumber(bottom)
+end
+
+local function PlaceFrameBottomLeft(frame, left, bottom)
+  if not frame then return end
+  pcall(function()
+    frame:ClearAllPoints()
+    frame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", left, bottom)
+  end)
+end
+
+local function NudgeStep()
+  local fn = U.G("IsShiftKeyDown")
+  if type(fn) == "function" then
+    local ok, held = pcall(fn)
+    if ok and held and held ~= 0 then return 10 end
+  end
+  return 1
+end
+
+local function PersistEntry(entry)
+  if not entry then return end
+  local point, _, relativePoint, x, y = U.GetFramePoint(entry.frame, 1)
+  if point then
+    U.SavePosition(entry.id, point, relativePoint, x, y)
+  end
+end
+
+function ClampToInsets(entry)
+  if not entry or not entry.frame then return end
+  local padL, padR, padT, padB = SnapPads()
+  if padL == 0 and padR == 0 and padT == 0 and padB == 0 then return end
+  local left, bottom = FrameLeftBottom(entry.frame)
+  if not left or not bottom then return end
+  local okW, width = pcall(entry.frame.GetWidth, entry.frame)
+  local okH, height = pcall(entry.frame.GetHeight, entry.frame)
+  width = (okW and tonumber(width)) or 0
+  height = (okH and tonumber(height)) or 0
+  local sw, sh = U.UIWidth(), U.UIHeight()
+  local maxL = sw - padR - width
+  local maxB = sh - padT - height
+  if maxL < padL then maxL = padL end
+  if maxB < padB then maxB = padB end
+  if left < padL then left = padL end
+  if bottom < padB then bottom = padB end
+  if left > maxL then left = maxL end
+  if bottom > maxB then bottom = maxB end
+  PlaceFrameBottomLeft(entry.frame, left, bottom)
+  PersistEntry(entry)
+end
+
+function PaintHandle(entry)
+  if not entry or not entry.handle then return end
+  if selectedEntry == entry then
+    U.SetBorderColor(entry.handle, 1.00, 0.82, 0.18, 1)
+  else
+    U.SetBorderColor(entry.handle, M.Unpack(M.color.moverEdge))
+  end
+end
+
+function SelectEntry(entry)
+  local prev = selectedEntry
+  selectedEntry = entry
+  if prev and prev ~= entry then PaintHandle(prev) end
+  if entry then
+    if entry.frame and entry.frame.Show then pcall(entry.frame.Show, entry.frame) end
+    if not entry.handle then ShowHandle(entry) end
+    PaintHandle(entry)
+  end
+  if RefreshInfo then RefreshInfo() end
+  if RefreshMoveList then RefreshMoveList() end
+end
+
+local function NudgeSelected(dx, dy)
+  local entry = selectedEntry
+  if not entry or not entry.frame then return end
+  local step = NudgeStep()
+  local left, bottom = FrameLeftBottom(entry.frame)
+  if not left or not bottom then return end
+  PlaceFrameBottomLeft(entry.frame, left + dx * step, bottom + dy * step)
+  PersistEntry(entry)
+  if RefreshInfo then RefreshInfo() end
+end
+
+local function CenterSelected()
+  local entry = selectedEntry
+  if not entry or not entry.frame then return end
+  local okW, width = pcall(entry.frame.GetWidth, entry.frame)
+  local okH, height = pcall(entry.frame.GetHeight, entry.frame)
+  width = (okW and tonumber(width)) or 160
+  height = (okH and tonumber(height)) or 24
+  local sw, sh = U.UIWidth(), U.UIHeight()
+  PlaceFrameBottomLeft(entry.frame, (sw - width) / 2, (sh - height) / 2)
+  PersistEntry(entry)
+  if RefreshInfo then RefreshInfo() end
+end
+
+local function PlaceInfoPanel()
+  if not editPanel then return end
+  local cfg = MoverCfg()
+  local sw, sh = U.UIWidth(), U.UIHeight()
+  local left = tonumber(cfg.infoX)
+  local bottom = tonumber(cfg.infoY)
+  if not left then left = math.floor((sw - INFO_W) / 2) end
+  if not bottom then bottom = sh - INFO_H - 16 end
+  if left < 8 then left = 8 end
+  if bottom < 8 then bottom = 8 end
+  editPanel:ClearAllPoints()
+  editPanel:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", left, bottom)
+end
+
+local function SaveInfoPos()
+  if not editPanel then return end
+  local left, bottom = FrameLeftBottom(editPanel)
+  if not left or not bottom then return end
+  local cfg = MoverCfg()
+  cfg.infoX = U.Round(left)
+  cfg.infoY = U.Round(bottom)
+end
+
+local function PlaceListPanel()
+  if not editPanel or not editPanel.listPanel then return end
+  local panel = editPanel.listPanel
+  if not editPanel.listOpen then
+    panel:Hide()
+    return
+  end
+  panel:ClearAllPoints()
+  panel:SetPoint("TOPLEFT", editPanel, "TOPRIGHT", 4, 0)
+  panel:SetWidth(LIST_W)
+  panel:SetHeight(LIST_H)
+  pcall(panel.Show, panel)
+end
+
+function RefreshInfo()
+  if not editPanel or not editPanel.body then return end
+  local lines = "Click a frame. Esc saves."
+  local entry = selectedEntry
+  if entry then
+    local left, bottom = FrameLeftBottom(entry.frame)
+    lines = "|cffffd24d" .. tostring(entry.label) .. "|r"
+    if left and bottom then
+      lines = lines .. "\n" .. math.floor(left + 0.5) .. ", " .. math.floor(bottom + 0.5)
+    end
+    local okW, width = pcall(entry.frame.GetWidth, entry.frame)
+    local okH, height = pcall(entry.frame.GetHeight, entry.frame)
+    if okW and okH and tonumber(width) and tonumber(height) then
+      lines = lines .. "\n" .. math.floor(width + 0.5) .. " x " .. math.floor(height + 0.5)
+    end
+    lines = lines .. "\nShift+nudge = 10px"
+  else
+    local list = VisibleMovers()
+    local n, shown = 1, 0
+    for n = 1, table.getn(list) do
+      if shown >= 5 then
+        lines = lines .. "\n..."
+        break
+      end
+      local item = list[n]
+      local left, bottom = FrameLeftBottom(item.frame)
+      if left and bottom then
+        lines = lines .. "\n" .. item.label .. "  " ..
+                math.floor(left + 0.5) .. "," .. math.floor(bottom + 0.5)
+        shown = shown + 1
+      end
+    end
+  end
+  pcall(editPanel.body.SetText, editPanel.body, lines)
+end
+
+function RefreshMoveList()
+  if not editPanel or not editPanel.listBtns then return end
+  if not editPanel.listOpen then
+    PlaceListPanel()
+    return
+  end
+  PlaceListPanel()
+  local list = VisibleMovers()
+  local n
+  for n = 1, table.getn(editPanel.listBtns) do
+    local btn = editPanel.listBtns[n]
+    local entry = list[n]
+    if entry then
+      btn.qtpEntry = entry
+      if btn.label then
+        pcall(btn.label.SetText, btn.label, entry.label)
+        pcall(btn.label.Show, btn.label)
+      end
+      if selectedEntry == entry then
+        U.SetBorderColor(btn, 1.00, 0.82, 0.18, 1)
+        U.SetBackgroundColor(btn, 0.28, 0.20, 0.04, 0.96)
+      else
+        U.SetBorderColor(btn, M.Unpack(M.color.border))
+        U.SetBackgroundColor(btn, M.Unpack(M.color.background))
+      end
+      local col, row = 0, n - 1
+      if row >= 18 then
+        col = 1
+        row = row - 18
+      end
+      btn:ClearAllPoints()
+      btn:SetPoint("TOPLEFT", editPanel.listPanel, "TOPLEFT",
+                   6 + col * 100, -22 - row * 14)
+      btn:SetWidth(96)
+      btn:SetHeight(13)
+      pcall(btn.Show, btn)
+    else
+      btn.qtpEntry = nil
+      pcall(btn.Hide, btn)
+      if btn.label then pcall(btn.label.Hide, btn.label) end
+    end
+  end
+end
+
+local function MakeInfoButton(parent, name, text, width, height, onClick)
+  local btn = U.CreateButton(parent, {
+    name = name,
+    text = text,
+    width = width,
+    height = height,
+    onClick = onClick,
+  })
+  return btn
+end
+
 local function CreateEditPanel()
   editPanel = U.CreatePanel(UIParent, {
     name = "QtUiPlusEditPanel",
-    width = 280,
-    height = 112,
+    width = INFO_W,
+    height = INFO_H,
   })
-  editPanel:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-  pcall(editPanel.SetFrameStrata, editPanel, "HIGH")
+  pcall(editPanel.SetFrameStrata, editPanel, "TOOLTIP")
+  pcall(editPanel.SetFrameLevel, editPanel, 250)
+  pcall(editPanel.EnableMouse, editPanel, true)
+  pcall(editPanel.SetMovable, editPanel, true)
+  editPanel:RegisterForDrag("LeftButton")
+  editPanel:SetScript("OnDragStart", function()
+    pcall(editPanel.StartMoving, editPanel)
+  end)
+  editPanel:SetScript("OnDragStop", function()
+    pcall(editPanel.StopMovingOrSizing, editPanel)
+    SaveInfoPos()
+    PlaceListPanel()
+  end)
 
   local title = U.CreateLabel(editPanel, {
-    size = M.fontSize.large,
-    color = M.color.text,
+    size = M.fontSize.normal,
+    color = M.color.accent,
     inherits = "GameFontNormal",
   })
   if title then
-    title:SetPoint("TOP", editPanel, "TOP", 0, -12)
-    title:SetText("QtUiPlus edit mode")
+    title:SetPoint("TOPLEFT", editPanel, "TOPLEFT", 10, -8)
+    title:SetText("INFO")
   end
   editPanel.title = title
 
-  local hint = U.CreateLabel(editPanel, {
+  local body = U.CreateLabel(editPanel, {
     size = M.fontSize.small,
-    color = M.color.textDim,
+    color = M.color.text,
     inherits = "GameFontNormalSmall",
+    justify = "LEFT",
   })
-  if hint then
-    hint:SetPoint("TOP", editPanel, "TOP", 0, -34)
-    hint:SetText("Drag a frame to move it. It snaps to the grid.")
+  if body then
+    body:SetPoint("TOPLEFT", editPanel, "TOPLEFT", 10, -26)
+    body:SetWidth(INFO_W - 20)
+    body:SetHeight(62)
+    if body.SetJustifyV then pcall(body.SetJustifyV, body, "TOP") end
+    body:SetText("Click a frame. Esc saves.")
   end
-  editPanel.hint = hint
+  editPanel.body = body
 
-  local hint2 = U.CreateLabel(editPanel, {
-    size = M.fontSize.small,
-    color = M.color.textDim,
-    inherits = "GameFontNormalSmall",
-  })
-  if hint2 then
-    hint2:SetPoint("TOP", editPanel, "TOP", 0, -50)
-    hint2:SetText("Hold Shift while dropping for free placement.")
+  local function MouseLeftHeld()
+    local fn = U.G("IsMouseButtonDown")
+    if type(fn) ~= "function" then return nil end
+    local ok, held = pcall(fn, "LeftButton")
+    if not ok then return nil end
+    if held == true or held == 1 or held == "1" then return true end
+    return false
   end
-  editPanel.hint2 = hint2
+
+  local nudgeHold
+  local function StopNudgeHold()
+    nudgeHold = nil
+    if type(U.UnregisterUpdate) == "function" then
+      U.UnregisterUpdate("mover.nudge")
+    end
+  end
+
+  local function StartNudgeHold(dx, dy)
+    StopNudgeHold()
+    if dx == 0 and dy == 0 then
+      CenterSelected()
+      return
+    end
+    NudgeSelected(dx, dy)
+    nudgeHold = { dx = dx, dy = dy, elapsed = 0, repeating = nil }
+    if type(U.RegisterUpdate) ~= "function" then return end
+    U.RegisterUpdate("mover.nudge", 0.05, function()
+      if not nudgeHold then return end
+      if MouseLeftHeld() == false then
+        StopNudgeHold()
+        return
+      end
+      nudgeHold.elapsed = (nudgeHold.elapsed or 0) + 0.05
+      local delay = 0.32
+      if nudgeHold.repeating then delay = 0.07 end
+      if nudgeHold.elapsed >= delay then
+        nudgeHold.elapsed = 0
+        nudgeHold.repeating = true
+        NudgeSelected(nudgeHold.dx, nudgeHold.dy)
+      end
+    end)
+  end
+
+  local function BindNudge(btn, dx, dy)
+    if not btn then return end
+    btn:SetScript("OnMouseDown", function()
+      StartNudgeHold(dx, dy)
+    end)
+    btn:SetScript("OnMouseUp", function()
+      StopNudgeHold()
+    end)
+  end
+
+  editPanel.nudgeLeft = MakeInfoButton(editPanel, "QtUiPlusEditNudgeLeft", "<",
+    22, 18, function() end)
+  editPanel.nudgeDown = MakeInfoButton(editPanel, "QtUiPlusEditNudgeDown", "v",
+    22, 18, function() end)
+  editPanel.nudgeUp = MakeInfoButton(editPanel, "QtUiPlusEditNudgeUp", "^",
+    22, 18, function() end)
+  editPanel.nudgeRight = MakeInfoButton(editPanel, "QtUiPlusEditNudgeRight", ">",
+    22, 18, function() end)
+  BindNudge(editPanel.nudgeLeft, -1, 0)
+  BindNudge(editPanel.nudgeDown, 0, -1)
+  BindNudge(editPanel.nudgeUp, 0, 1)
+  BindNudge(editPanel.nudgeRight, 1, 0)
+  editPanel.nudgeCenter = MakeInfoButton(editPanel, "QtUiPlusEditNudgeCenter", "Center",
+    86, 18, function() CenterSelected() end)
+  editPanel.listToggle = MakeInfoButton(editPanel, "QtUiPlusEditListToggle", "Hide",
+    86, 18, function()
+      editPanel.listOpen = not editPanel.listOpen
+      SetButtonCaption(editPanel.listToggle, editPanel.listOpen and "Hide" or "List")
+      RefreshMoveList()
+    end)
+  editPanel.listOpen = true
+
+  editPanel.nudgeDown:SetPoint("BOTTOMLEFT", editPanel, "BOTTOMLEFT", 38, 36)
+  editPanel.nudgeLeft:SetPoint("BOTTOMLEFT", editPanel, "BOTTOMLEFT", 14, 56)
+  editPanel.nudgeRight:SetPoint("BOTTOMLEFT", editPanel, "BOTTOMLEFT", 62, 56)
+  editPanel.nudgeUp:SetPoint("BOTTOMLEFT", editPanel, "BOTTOMLEFT", 38, 76)
+  editPanel.nudgeCenter:SetPoint("BOTTOMLEFT", editPanel, "BOTTOMLEFT", 92, 56)
+  editPanel.listToggle:SetPoint("BOTTOMLEFT", editPanel, "BOTTOMLEFT", 92, 76)
 
   editPanel.save = U.CreateButton(editPanel, {
     name = "QtUiPlusEditSave",
     text = "Save and exit",
     width = 140,
-    height = 24,
+    height = 22,
     onClick = function() U.LockUI() end,
   })
-  editPanel.save:SetPoint("BOTTOM", editPanel, "BOTTOM", 0, 12)
+  editPanel.save:SetPoint("BOTTOM", editPanel, "BOTTOM", 0, 10)
 
+  local list = U.CreatePanel(UIParent, {
+    name = "QtUiPlusEditList",
+    width = LIST_W,
+    height = LIST_H,
+  })
+  pcall(list.SetFrameStrata, list, "TOOLTIP")
+  pcall(list.SetFrameLevel, list, 260)
+  local listTitle = U.CreateLabel(list, {
+    size = M.fontSize.small,
+    color = M.color.accent,
+    inherits = "GameFontNormalSmall",
+  })
+  if listTitle then
+    listTitle:SetPoint("TOPLEFT", list, "TOPLEFT", 8, -6)
+    listTitle:SetText("Frames")
+  end
+  editPanel.listTitle = listTitle
+  editPanel.listPanel = list
+  editPanel.listBtns = {}
+  local i
+  for i = 1, LIST_ROWS do
+    local btn = U.CreateButton(list, {
+      name = "QtUiPlusEditList" .. i,
+      text = "",
+      width = 96,
+      height = 13,
+      onClick = function()
+        local row = editPanel.listBtns[i]
+        if row and row.qtpEntry then SelectEntry(row.qtpEntry) end
+      end,
+    })
+    editPanel.listBtns[i] = btn
+    btn:Hide()
+  end
+  list:Hide()
+
+  PlaceInfoPanel()
   editPanel:Hide()
+end
+
+local function ShowPanelParts()
+  if not editPanel then return end
+  local parts = {
+    editPanel.title, editPanel.body,
+    editPanel.nudgeLeft, editPanel.nudgeRight, editPanel.nudgeUp, editPanel.nudgeDown,
+    editPanel.nudgeCenter, editPanel.listToggle, editPanel.save,
+  }
+  local i
+  for i = 1, table.getn(parts) do
+    if parts[i] then pcall(parts[i].Show, parts[i]) end
+  end
+end
+
+local function HidePanelParts()
+  if not editPanel then return end
+  local parts = {
+    editPanel.title, editPanel.body,
+    editPanel.nudgeLeft, editPanel.nudgeRight, editPanel.nudgeUp, editPanel.nudgeDown,
+    editPanel.nudgeCenter, editPanel.listToggle, editPanel.save,
+    editPanel.listTitle,
+  }
+  local i
+  for i = 1, table.getn(parts) do
+    if parts[i] then pcall(parts[i].Hide, parts[i]) end
+  end
+  if editPanel.listBtns then
+    for i = 1, table.getn(editPanel.listBtns) do
+      local btn = editPanel.listBtns[i]
+      pcall(btn.Hide, btn)
+      if btn.label then pcall(btn.label.Hide, btn.label) end
+    end
+  end
+  if editPanel.listPanel then editPanel.listPanel:Hide() end
 end
 
 -- rendering.parent_alpha_not_propagated: children are shown and hidden
@@ -439,22 +895,22 @@ local function ShowEditOverlay()
   if not editPanel then CreateEditPanel() end
 
   grid:Show()
+  PlaceInfoPanel()
   editPanel:Show()
-  if editPanel.title then editPanel.title:Show() end
-  if editPanel.hint then editPanel.hint:Show() end
-  if editPanel.hint2 then editPanel.hint2:Show() end
-  if editPanel.save then editPanel.save:Show() end
+  ShowPanelParts()
+  selectedEntry = nil
+  editPanel.listOpen = true
+  SetButtonCaption(editPanel.listToggle, "Hide")
+  RefreshInfo()
+  RefreshMoveList()
 end
 
 local function HideEditOverlay()
   if grid then grid:Hide() end
   if not editPanel then return end
-
-  if editPanel.title then editPanel.title:Hide() end
-  if editPanel.hint then editPanel.hint:Hide() end
-  if editPanel.hint2 then editPanel.hint2:Hide() end
-  if editPanel.save then editPanel.save:Hide() end
+  HidePanelParts()
   editPanel:Hide()
+  selectedEntry = nil
 end
 
 function U.GridSize()
@@ -469,7 +925,7 @@ end
 -- once, at a fixed spacing, so a new pitch would otherwise snap frames onto a
 -- grid that does not match the one being drawn.
 function U.SetGridSize(value)
-  local cfg = U.ModuleConfig("mover", { gridSize = GRID_SIZE })
+  local cfg = MoverCfg()
   cfg.gridSize = U.Round(tonumber(value) or GRID_SIZE)
 
   if grid then
@@ -485,6 +941,30 @@ function U.SetGridSize(value)
   end
 
   return GridPitch()
+end
+
+function U.SnapPadLimits()
+  return PAD_LIMITS.min, PAD_LIMITS.max, PAD_LIMITS.step
+end
+
+function U.GetSnapPad(edge)
+  local padL, padR, padT, padB = SnapPads()
+  if edge == "left" then return padL end
+  if edge == "right" then return padR end
+  if edge == "top" then return padT end
+  if edge == "bottom" then return padB end
+  return 0
+end
+
+function U.SetSnapPad(edge, value)
+  local cfg = MoverCfg()
+  value = ClampPad(value)
+  if edge == "left" then cfg.snapPadLeft = value
+  elseif edge == "right" then cfg.snapPadRight = value
+  elseif edge == "top" then cfg.snapPadTop = value
+  elseif edge == "bottom" then cfg.snapPadBottom = value
+  end
+  return value
 end
 
 -- ---------------------------------------------------------------------------
@@ -554,10 +1034,42 @@ function U.IsUnlocked()
   return unlocked
 end
 
+local hookedEsc
+local originalToggleGameMenu
+local originalCloseSpecial
+
+local function HookEscapeToLock()
+  if hookedEsc then return end
+  hookedEsc = true
+  local toggle = U.G("ToggleGameMenu")
+  if type(toggle) == "function" then
+    originalToggleGameMenu = toggle
+    U.SetG("ToggleGameMenu", function()
+      if unlocked then
+        U.LockUI()
+        return
+      end
+      originalToggleGameMenu()
+    end)
+  end
+  local close = U.G("CloseSpecialWindows")
+  if type(close) == "function" then
+    originalCloseSpecial = close
+    U.SetG("CloseSpecialWindows", function()
+      if unlocked then
+        U.LockUI()
+        return 1
+      end
+      return originalCloseSpecial()
+    end)
+  end
+end
+
 function U.UnlockUI()
   unlocked = true
   if U.db then U.db.locked = false end
 
+  HookEscapeToLock()
   ShowEditOverlay()
 
   local i
@@ -565,14 +1077,18 @@ function U.UnlockUI()
     ShowHandle(movers[moverOrder[i]])
   end
 
-  U.Print("Edit mode. Drag frames onto the grid, then use " ..
-          "|cffffff00Save and exit|r (or |cffffff00/qtp lock|r).")
+  U.Print("Anchor mode. Click a frame, then nudge from the INFO window. " ..
+          "Shift snaps / 10px. Esc saves.")
 end
 
 function U.LockUI()
   unlocked = false
   if U.db then U.db.locked = true end
 
+  if type(U.UnregisterUpdate) == "function" then
+    U.UnregisterUpdate("mover.info")
+    U.UnregisterUpdate("mover.nudge")
+  end
   HideEditOverlay()
 
   local i

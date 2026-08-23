@@ -50,6 +50,12 @@ M.texture = {
   plain = "Interface\\BUTTONS\\WHITE8X8",
   chatResizeGrip = "Interface\\AddOns\\QtUiPlus\\media\\chat_resize_grip",
   restIcon = "Interface\\AddOns\\QtUiPlus\\media\\rest-icon",
+  closeNormal = "Interface\\AddOns\\QtUiPlus\\media\\close_normal",
+  closePushed = "Interface\\AddOns\\QtUiPlus\\media\\close_pushed",
+  meterReset = "Interface\\AddOns\\QtUiPlus\\media\\reset",
+  meterAnnounce = "Interface\\AddOns\\QtUiPlus\\media\\announce",
+  meterPlus = "Interface\\AddOns\\QtUiPlus\\media\\plus",
+  meterMinus = "Interface\\AddOns\\QtUiPlus\\media\\minus",
 }
 
 -- ---------------------------------------------------------------------------
@@ -169,8 +175,8 @@ function M.ReactionColor(index)
   return nil
 end
 
--- Vanilla class colours. RAID_CLASS_COLORS is used when the client provides it,
--- but existence is not assumed.
+-- QtUI UnitFrames.lua classColors (Vanilla RAID_CLASS_COLORS). Used for
+-- health bars, chat names and tooltips so the two addons paint the same.
 M.class = {
   WARRIOR = { 0.78, 0.61, 0.43 },
   MAGE    = { 0.41, 0.80, 0.94 },
@@ -187,6 +193,9 @@ function M.ClassColor(class)
   if type(class) ~= "string" then return nil end
   local key = string.upper(class)
 
+  local own = M.class[key]
+  if own then return own[1], own[2], own[3] end
+
   local stock = U.G("RAID_CLASS_COLORS")
   if type(stock) == "table" and type(stock[key]) == "table" then
     local c = stock[key]
@@ -195,8 +204,6 @@ function M.ClassColor(class)
     end
   end
 
-  local own = M.class[key]
-  if own then return own[1], own[2], own[3] end
   return nil
 end
 

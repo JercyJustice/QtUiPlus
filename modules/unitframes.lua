@@ -262,7 +262,29 @@ local function BuildSizeDefaults()
     end
   end
   defaults.partySpacing = PARTY_SPACING
+
+  local ALIGN_DEFAULTS = {
+    player       = { Name = "left",   Health = "right",  Power = "right" },
+    target       = { Name = "right",  Health = "left",   Power = "left" },
+    targettarget = { Name = "center", Health = "center", Power = "right" },
+    pet          = { Name = "left",   Health = "right",  Power = "right" },
+    party        = { Name = "left",   Health = "right",  Power = "right" },
+  }
+  local g
+  for g = 1, table.getn(SIZE_GROUPS) do
+    local group = SIZE_GROUPS[g]
+    local specAlign = ALIGN_DEFAULTS[group.key] or ALIGN_DEFAULTS.player
+    defaults[group.key .. "NameAlign"] = specAlign.Name
+    defaults[group.key .. "HealthAlign"] = specAlign.Health
+    defaults[group.key .. "PowerAlign"] = specAlign.Power
+  end
   return defaults
+end
+
+local function SizeGroupKey(id)
+  if type(id) ~= "string" then return id end
+  if string.sub(id, 1, 5) == "party" then return "party" end
+  return id
 end
 
 local function ClampSize(name, value)
@@ -827,6 +849,70 @@ local function BuildBarLabels(box, labels, yOffset)
   end
 end
 
+local function AlignForToken(groupKey, token)
+  if not sizeCfg then return "left" end
+  local which = "Name"
+  if token == "healthdyn" then which = "Health"
+  elseif token == "powerdyn" then which = "Power"
+  end
+  local align = sizeCfg[groupKey .. which .. "Align"]
+  if type(align) ~= "string" or align == "" then
+    if which == "Health" or which == "Power" then return "right" end
+    return "left"
+  end
+  return align
+end
+
+local function ApplyBoxLabelAlign(box, labels, groupKey, yOffset)
+  if not box or not labels then return end
+  yOffset = yOffset or BAR_LABEL_Y_OFFSET
+  local layer = box.textLayer or box
+
+  if labels.right == "unitrev" and box.rightLabel and box.rightNameLabel then
+    local align = AlignForToken(groupKey, "unitrev")
+    if align == "right" or align == "topright" or align == "bottomright" then
+      U.PlaceAligned(box.rightLabel, layer, align, BAR_LABEL_MARGIN, yOffset)
+      pcall(box.rightNameLabel.ClearAllPoints, box.rightNameLabel)
+      pcall(box.rightNameLabel.SetPoint, box.rightNameLabel,
+            "RIGHT", box.rightLabel, "LEFT", -NAME_LEVEL_GAP, 0)
+    else
+      U.PlaceAligned(box.rightNameLabel, layer, align, BAR_LABEL_MARGIN, yOffset)
+      pcall(box.rightLabel.ClearAllPoints, box.rightLabel)
+      pcall(box.rightLabel.SetPoint, box.rightLabel,
+            "LEFT", box.rightNameLabel, "RIGHT", NAME_LEVEL_GAP, 0)
+    end
+  else
+    if box.leftLabel and labels.left then
+      U.PlaceAligned(box.leftLabel, layer, AlignForToken(groupKey, labels.left),
+                     BAR_LABEL_MARGIN, yOffset)
+    end
+    if box.rightLabel and labels.right then
+      U.PlaceAligned(box.rightLabel, layer, AlignForToken(groupKey, labels.right),
+                     BAR_LABEL_MARGIN, yOffset)
+    end
+  end
+end
+
+local function ApplyFrameTextAlign(frame)
+  if not frame or not frame.spec then return end
+  local spec = frame.spec
+  local groupKey = SizeGroupKey(spec.id)
+  if spec.healthText and frame.health and frame.health.label then
+    local layer = frame.health.textLayer or frame.health
+    U.PlaceAligned(frame.health.label, layer,
+                   AlignForToken(groupKey, spec.healthText), 0, BAR_LABEL_Y_OFFSET)
+  end
+  ApplyBoxLabelAlign(frame.health, spec.healthLabels, groupKey, BAR_LABEL_Y_OFFSET)
+  ApplyBoxLabelAlign(frame.power, spec.powerLabels, groupKey, POWER_LABEL_Y_OFFSET)
+end
+
+local function ApplyAllTextAlign()
+  local i
+  for i = 1, table.getn(frameOrder) do
+    ApplyFrameTextAlign(frames[frameOrder[i]])
+  end
+end
+
 -- The third bar: no fill, no value, just a bordered strip carrying up to three
 -- text slots. Built the same way as a bar box (backdrop + border) so it reads
 -- as a matching third row rather than bare text floating under the power bar.
@@ -1151,6 +1237,8 @@ local function BuildFrame(spec, parent)
   frame.power = power
   frame.values = values
 
+  ApplyFrameTextAlign(frame)
+
   frame:Hide()
   frame.qtpShown = false
   return frame
@@ -1223,10 +1311,14 @@ local function ResizeFrame(frame)
                    spec.anchorRelativePoint or "TOPLEFT",
                    spec.anchorOffsetX or 0, spec.anchorOffsetY or 0)
   end
+
+  ApplyFrameTextAlign(frame)
 end
 
 local UNIT_RESIZE_GRIP = 14
-local UNIT_RESIZE_IDS = { targettarget = true, pet = true }
+local UNIT_RESIZE_IDS = {
+  player = true, target = true, targettarget = true, pet = true,
+}
 
 local function CommitUnitResize(frame)
   if not frame or not frame.spec or not sizeCfg then return end
@@ -1315,6 +1407,13 @@ local function UpdateUnitResizeGrips()
   for id, frame in pairs(frames) do
     if frame and frame.qtpResizeGrip then
       if show then
+        -- Sit above the mover handle (frame+10) so the corner stays a
+        -- resize hit, not a drag.
+        local levelOk, level = pcall(frame.GetFrameLevel, frame)
+        if levelOk and tonumber(level) then
+          pcall(frame.qtpResizeGrip.SetFrameLevel, frame.qtpResizeGrip,
+                tonumber(level) + 30)
+        end
         pcall(frame.qtpResizeGrip.Show, frame.qtpResizeGrip)
       else
         pcall(frame.qtpResizeGrip.Hide, frame.qtpResizeGrip)
@@ -1414,6 +1513,8 @@ local COLOR_DEFAULTS = {
   -- covers everything the player does not control.
   classColorPlayers = false,
   reactionColors    = false,
+  -- QtUI "Gradient bars": fade health from red/yellow into the base colour.
+  gradientBars      = true,
 }
 
 do
@@ -1503,7 +1604,7 @@ local function ApplyHealthColor(frame)
   local cr, cg, cb = HealthColorFor(frame)
 
   local r, g, b
-  if cfg.customColors or perc >= 1 then
+  if cfg.customColors or cfg.gradientBars == false or perc >= 1 then
     r, g, b = cr, cg, cb
   else
     r, g, b = PastelBar(Gradient(perc))
@@ -2379,6 +2480,29 @@ local function BuildUnitFrameColorSettings(parent, y)
   reactionToggle.SetPoint("TOPLEFT", parent, "TOPLEFT", 260, y - 50)
   table.insert(widgets, reactionToggle)
 
+  local gradientToggle = U.CreateCheckbox(parent, {
+    name = "QtUiPlusSettingsGradientBars",
+    text = "Gradient bars",
+    value = ColorConfig().gradientBars ~= false,
+    onChange = function(value)
+      ColorConfig().gradientBars = value and true or false
+      U.ApplyUnitFrameColors()
+    end,
+  })
+  gradientToggle.SetPoint("TOPLEFT", parent, "TOPLEFT", 260, y - 74)
+  table.insert(widgets, gradientToggle)
+
+  local classTip = U.CreateCheckbox(parent, {
+    name = "QtUiPlusSettingsClassTooltip",
+    text = "Class on player tooltips",
+    value = U.ModuleConfig("tooltip", { classColor = true }).classColor ~= false,
+    onChange = function(value)
+      U.ModuleConfig("tooltip", { classColor = true }).classColor = value and true or false
+    end,
+  })
+  classTip.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, y - 98)
+  table.insert(widgets, classTip)
+
   local healthPicker = U.CreateColorPicker(parent, {
     name = "QtUiPlusSettingsHealthColor",
     text = "Health bar color",
@@ -2406,7 +2530,7 @@ local function BuildUnitFrameColorSettings(parent, y)
     justify = "LEFT",
   })
   if powerHeader then
-    powerHeader:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, y - 58)
+    powerHeader:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, y - 124)
     powerHeader:SetText("Power bar colors")
     table.insert(widgets, powerHeader)
   end
@@ -2435,7 +2559,7 @@ local function BuildUnitFrameColorSettings(parent, y)
       end,
     })
     picker.SetPoint("TOPLEFT", parent, "TOPLEFT",
-                    12 + (i - 1) * COLUMN_WIDTH, y - 80)
+                    12 + (i - 1) * COLUMN_WIDTH, y - 146)
     table.insert(widgets, picker)
     table.insert(powerPickers, picker)
   end
@@ -2447,6 +2571,8 @@ local function BuildUnitFrameColorSettings(parent, y)
     classToggle.SetValue(cfg.classColorPlayers)
     totToggle.SetValue(ShowTargetTarget())
     reactionToggle.SetValue(cfg.reactionColors)
+    gradientToggle.SetValue(cfg.gradientBars ~= false)
+    classTip.SetValue(U.ModuleConfig("tooltip", { classColor = true }).classColor ~= false)
 
     local n
     for n = 1, table.getn(POWER_TYPES) do
@@ -2478,6 +2604,21 @@ function U.SetUnitFrameSize(key, value)
   sizeCfg[key] = tonumber(value) or sizeCfg[key]
   ResizeAllFrames()
   return sizeCfg[key]
+end
+
+function U.GetUnitFrameAlign(group, which)
+  if not sizeCfg then return "left" end
+  local align = sizeCfg[group .. which .. "Align"]
+  if type(align) ~= "string" or align == "" then return "left" end
+  return align
+end
+
+function U.SetUnitFrameAlign(group, which, value)
+  if not sizeCfg then return nil end
+  if type(value) ~= "string" then return nil end
+  sizeCfg[group .. which .. "Align"] = value
+  ApplyAllTextAlign()
+  return value
 end
 
 local SIZE_PAGE_GROUP = "unitsizes"
@@ -2523,11 +2664,46 @@ local function BuildSizePage(group)
       table.insert(widgets, slider)
     end
 
+    local ALIGN_ROWS = {
+      { which = "Name",   text = "Name" },
+      { which = "Health", text = "Health" },
+    }
+    if group.power then
+      table.insert(ALIGN_ROWS, { which = "Power", text = "Mana" })
+    end
+    local alignY = -40 - table.getn(rows) * 44 - 8
+    local a
+    for a = 1, table.getn(ALIGN_ROWS) do
+      local spec = ALIGN_ROWS[a]
+      local picker = U.CreateCyclePicker(parent, {
+        name = "QtUiPlusUnitAlign" .. group.key .. spec.which,
+        text = spec.text,
+        width = 200,
+        value = U.GetUnitFrameAlign(group.key, spec.which),
+        values = U.ALIGN_OPTIONS,
+        onChange = function(value)
+          U.SetUnitFrameAlign(group.key, spec.which, value)
+        end,
+      })
+      local col, row = 0, 0
+      if a == 2 then col = 1 end
+      if a == 3 then row = 1 end
+      picker.SetPoint("TOPLEFT", parent, "TOPLEFT", col * 258, alignY - row * 48)
+      controls["align" .. spec.which] = picker
+      table.insert(widgets, picker)
+    end
+
     local function Refresh()
       local j
       for j = 1, table.getn(rows) do
         local key = rows[j].key
         if controls[key] then controls[key].SetValue(U.GetUnitFrameSize(key)) end
+      end
+      for j = 1, table.getn(ALIGN_ROWS) do
+        local which = ALIGN_ROWS[j].which
+        if controls["align" .. which] then
+          controls["align" .. which].SetValue(U.GetUnitFrameAlign(group.key, which))
+        end
       end
     end
 

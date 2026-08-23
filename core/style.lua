@@ -807,6 +807,51 @@ end
 -- here re-centres every button label in every QtUiPlus interface at once.
 U.BUTTON_LABEL_OFFSET_Y = -2
 
+-- Nine-point placement used by hotkeys and unit-frame labels. Single-edge
+-- anchors only: fonts.stretched_justification_ignored means a FontString
+-- stretched corner-to-corner with SetJustifyH does not actually justify.
+U.ALIGN_OPTIONS = {
+  { key = "left",        label = "Left" },
+  { key = "center",      label = "Center" },
+  { key = "right",       label = "Right" },
+  { key = "top",         label = "Top" },
+  { key = "bottom",      label = "Bottom" },
+  { key = "topleft",     label = "Top Left" },
+  { key = "topright",    label = "Top Right" },
+  { key = "bottomleft",  label = "Bottom Left" },
+  { key = "bottomright", label = "Bottom Right" },
+}
+
+function U.PlaceAligned(region, parent, align, pad, oy)
+  if not region or not parent then return end
+  pad = tonumber(pad)
+  if not pad then pad = 2 end
+  oy = tonumber(oy) or 0
+  align = align or "center"
+
+  local point, x, y = "CENTER", 0, oy
+  if align == "left" then
+    point, x, y = "LEFT", pad, oy
+  elseif align == "right" then
+    point, x, y = "RIGHT", -pad, oy
+  elseif align == "top" then
+    point, x, y = "TOP", 0, -pad + oy
+  elseif align == "bottom" then
+    point, x, y = "BOTTOM", 0, pad + oy
+  elseif align == "topleft" then
+    point, x, y = "TOPLEFT", pad, -pad + oy
+  elseif align == "topright" then
+    point, x, y = "TOPRIGHT", -pad, -pad + oy
+  elseif align == "bottomleft" then
+    point, x, y = "BOTTOMLEFT", pad, pad + oy
+  elseif align == "bottomright" then
+    point, x, y = "BOTTOMRIGHT", -pad, pad + oy
+  end
+
+  pcall(region.ClearAllPoints, region)
+  pcall(region.SetPoint, region, point, parent, point, x, y)
+end
+
 function U.CenterButtonLabel(label, button)
   if not label or not button then return end
   pcall(label.ClearAllPoints, label)

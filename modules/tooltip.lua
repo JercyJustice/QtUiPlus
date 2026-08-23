@@ -280,6 +280,9 @@ local function RefreshTooltip(force)
     ClearNativeEdge(U.G("GameTooltipStatusBar"))
   end
 
+  local tipCfg = U.ModuleConfig("tooltip", { classColor = true })
+  if tipCfg.classColor == false then return end
+
   if not IsTruthy(Call("UnitIsPlayer", "mouseover")) then return end
 
   local unitName = Call("UnitName", "mouseover")
@@ -380,6 +383,57 @@ local function InstallTriggers()
   return installed
 end
 
+-- ---------------------------------------------------------------------------
+-- Tooltip anchor
+--
+-- A dummy frame in edit mode. World / default-anchor tooltips (the ones that
+-- normally sit in the bottom-right corner) are pointed at it. Item and action
+-- tooltips that SetOwner a specific button stay on that button.
+-- ---------------------------------------------------------------------------
+local ANCHOR_W, ANCHOR_H = 180, 72
+local tooltipAnchor
+
+local function PlaceAtAnchor(tooltip)
+  if not tooltip or not tooltipAnchor then return end
+  pcall(function()
+    tooltip:ClearAllPoints()
+    tooltip:SetPoint("BOTTOMRIGHT", tooltipAnchor, "BOTTOMRIGHT", 0, 0)
+  end)
+end
+
+local function IsCornerTooltip(tooltip)
+  if not tooltip or not tooltip.GetOwner then return true end
+  local ok, owner = pcall(tooltip.GetOwner, tooltip)
+  if not ok or not owner then return true end
+  return owner == UIParent or owner == U.G("WorldFrame")
+end
+
+local function BuildTooltipAnchor()
+  if tooltipAnchor then return tooltipAnchor end
+
+  local frame = CreateFrame("Frame", "QtUiPlusTooltipAnchor", UIParent)
+  frame:SetWidth(ANCHOR_W)
+  frame:SetHeight(ANCHOR_H)
+  -- Invisible while locked: no mouse, no art. The mover handle is the only
+  -- thing that paints it in edit mode.
+  pcall(frame.EnableMouse, frame, false)
+
+  if type(U.RegisterMover) == "function" then
+    U.RegisterMover("tooltip.anchor", frame, {
+      label = "Tooltip",
+      default = {
+        point = "BOTTOMRIGHT",
+        relativePoint = "BOTTOMRIGHT",
+        x = -16,
+        y = 16,
+      },
+    })
+  end
+
+  tooltipAnchor = frame
+  return frame
+end
+
 function TT.OnEnable()
   -- Style once up front so the very first tooltip is already flat rather than
   -- relying on a trigger that has not fired yet.
@@ -387,6 +441,23 @@ function TT.OnEnable()
 
   if not InstallTriggers() then
     U.Debug("tooltip: no show hook installed, styling is poll-driven only")
+  end
+
+  BuildTooltipAnchor()
+
+  -- Vanilla world-unit tooltips go through this global. Original places them
+  -- in the bottom-right corner; we re-point at the dummy afterwards.
+  if type(U.PostHookGlobal) == "function" then
+    U.PostHookGlobal("GameTooltip_SetDefaultAnchor", function(tooltip, parent)
+      PlaceAtAnchor(tooltip)
+    end)
+  end
+
+  local tooltip = U.G("GameTooltip")
+  if tooltip then
+    U.PostHookScript(tooltip, "OnShow", function()
+      if IsCornerTooltip(tooltip) then PlaceAtAnchor(tooltip) end
+    end)
   end
 
   U.RegisterUpdate("tooltip.player-style", 0.10, function()

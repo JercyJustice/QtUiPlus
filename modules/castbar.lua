@@ -77,12 +77,23 @@ local M = U.media
 local CB = U.RegisterModule("castbar")
 
 -- Cell layout: the icon is flush against the bar cell (no gap between them),
--- and the bar cell takes the rest of WIDTH up to the right edge -- there is no
--- separate cell for the timer, which is drawn on top of the bar instead.
-local HEIGHT = 24
-local WIDTH = 230
-local ICON_SIZE = HEIGHT
-local BAR_WIDTH = WIDTH - ICON_SIZE
+-- and the bar cell takes the rest of the width up to the right edge -- there
+-- is no separate cell for the timer, which is drawn on top of the bar instead.
+-- Width and height are stored per bar and live-resized from a corner grip in
+-- edit mode, the same recipe as pet / ToT unit frames.
+local DEFAULT_HEIGHT = 24
+local DEFAULT_WIDTH = 230
+local SIZE_DEFAULTS = {
+  playerWidth = DEFAULT_WIDTH, playerHeight = DEFAULT_HEIGHT,
+  targetWidth = DEFAULT_WIDTH, targetHeight = DEFAULT_HEIGHT,
+}
+local SIZE_LIMITS = {
+  width  = { min = 120, max = 500 },
+  height = { min = 14,  max = 48 },
+}
+local GRIP_SIZE = 14
+
+local sizeCfg
 
 -- Shown whenever the spellbook lookup cannot produce a real icon, so the left
 -- cell is never an empty hole.
@@ -144,6 +155,158 @@ local lastIconSource = "none"
 
 -- Same shape as modules/actionbar.lua's helper: a global that is missing or
 -- differently shaped here returns nil rather than erroring.
+local function ClampSize(kind, value)
+  local limit = SIZE_LIMITS[kind]
+  value = tonumber(value)
+  if not limit then return value end
+  if not value then return limit.min end
+  value = U.Round(value)
+  if value < limit.min then value = limit.min end
+  if value > limit.max then value = limit.max end
+  return value
+end
+
+local function SizeConfig()
+  if not sizeCfg then sizeCfg = U.ModuleConfig("castbar", SIZE_DEFAULTS) end
+  return sizeCfg
+end
+
+-- Rebuilds icon cell, progress cell and fill from a new outer size. The icon
+-- stays square (equal to height) so stretching the bar only lengthens the
+-- progress cell.
+local function LayoutWidget(widget, width, height)
+  if not widget then return end
+  width = ClampSize("width", width)
+  height = ClampSize("height", height)
+  local iconSize = height
+  local barWidth = width - iconSize
+  local border = U.BorderSize()
+
+  widget:SetWidth(width)
+  widget:SetHeight(height)
+
+  if widget.iconCell then
+    widget.iconCell:SetWidth(iconSize)
+    widget.iconCell:SetHeight(height)
+  end
+  if widget.barCell then
+    widget.barCell:SetWidth(barWidth)
+    widget.barCell:SetHeight(height)
+    widget.barCell:ClearAllPoints()
+    if widget.iconCell then
+      widget.barCell:SetPoint("TOPLEFT", widget.iconCell, "TOPRIGHT", 0, 0)
+    end
+  end
+  if widget.bar then
+    widget.bar:SetWidth(barWidth - 2 * border)
+    widget.bar:SetHeight(height - 2 * border)
+    -- Fill is laid out from GetWidth; rewrite the current value so it
+    -- re-anchors instead of keeping the old extent.
+    local value = widget.bar.qtpValue
+    widget.bar.qtpValue = nil
+    pcall(widget.bar.SetValue, widget.bar, value)
+  end
+  if widget.name then
+    pcall(widget.name.SetWidth, widget.name, math.max(20, barWidth - 34))
+  end
+
+  widget.qtpWidth = width
+  widget.qtpHeight = height
+end
+
+local function ApplyStoredSize(widget, prefix)
+  local cfg = SizeConfig()
+  LayoutWidget(widget, cfg[prefix .. "Width"], cfg[prefix .. "Height"])
+end
+
+local function CommitWidgetResize(widget, prefix, moverId)
+  if not widget then return end
+  local w, h
+  if widget.GetWidth then
+    local ok, value = pcall(widget.GetWidth, widget)
+    if ok then w = tonumber(value) end
+  end
+  if widget.GetHeight then
+    local ok, value = pcall(widget.GetHeight, widget)
+    if ok then h = tonumber(value) end
+  end
+  LayoutWidget(widget, w, h)
+  local cfg = SizeConfig()
+  cfg[prefix .. "Width"] = widget.qtpWidth
+  cfg[prefix .. "Height"] = widget.qtpHeight
+
+  if moverId and type(U.GetFramePoint) == "function" and type(U.SavePosition) == "function" then
+    local point, _, relativePoint, x, y = U.GetFramePoint(widget, 1)
+    if point then U.SavePosition(moverId, point, relativePoint, x, y) end
+  end
+end
+
+local function AttachResizeGrip(widget, prefix, moverId)
+  if not widget or widget.qtpResizeGrip then return end
+
+  local grip = CreateFrame("Button", nil, widget)
+  grip:SetWidth(GRIP_SIZE)
+  grip:SetHeight(GRIP_SIZE)
+  grip:SetPoint("BOTTOMRIGHT", widget, "BOTTOMRIGHT", 2, -2)
+  pcall(grip.EnableMouse, grip, true)
+  grip:RegisterForDrag("LeftButton")
+
+  local levelOk, level = pcall(widget.GetFrameLevel, widget)
+  if levelOk and tonumber(level) then
+    pcall(grip.SetFrameLevel, grip, tonumber(level) + 30)
+  end
+
+  local icon = grip:CreateTexture(nil, "ARTWORK")
+  pcall(icon.SetTexture, icon, M.texture.chatResizeGrip)
+  icon:SetAllPoints(grip)
+  grip.icon = icon
+
+  grip:SetScript("OnDragStart", function()
+    if not U.IsUnlocked or not U.IsUnlocked() then return end
+    pcall(widget.SetResizable, widget, true)
+    pcall(widget.SetMinResize, widget,
+          SIZE_LIMITS.width.min, SIZE_LIMITS.height.min)
+    pcall(widget.SetMaxResize, widget,
+          SIZE_LIMITS.width.max, SIZE_LIMITS.height.max)
+    pcall(widget.StartSizing, widget, "BOTTOMRIGHT")
+  end)
+  grip:SetScript("OnDragStop", function()
+    pcall(widget.StopMovingOrSizing, widget)
+    CommitWidgetResize(widget, prefix, moverId)
+  end)
+
+  widget.qtpResizeGrip = grip
+  grip:Hide()
+end
+
+local gripsShown
+local function UpdateResizeGrips()
+  local show = U.IsUnlocked and U.IsUnlocked()
+  if show == gripsShown then return end
+  gripsShown = show and true or false
+
+  local list = { bar, targetBar }
+  local i
+  for i = 1, table.getn(list) do
+    local widget = list[i]
+    if widget and widget.qtpResizeGrip then
+      if gripsShown then
+        local levelOk, level = pcall(widget.GetFrameLevel, widget)
+        if levelOk and tonumber(level) then
+          pcall(widget.qtpResizeGrip.SetFrameLevel, widget.qtpResizeGrip,
+                tonumber(level) + 30)
+        end
+        pcall(widget.qtpResizeGrip.Show, widget.qtpResizeGrip)
+        if widget.qtpResizeGrip.icon then
+          pcall(widget.qtpResizeGrip.icon.Show, widget.qtpResizeGrip.icon)
+        end
+      else
+        pcall(widget.qtpResizeGrip.Hide, widget.qtpResizeGrip)
+      end
+    end
+  end
+end
+
 local function Call(name, a, b)
   local fn = U.G(name)
   if type(fn) ~= "function" then return nil end
@@ -376,6 +539,7 @@ local function Tick()
 
   UpdateVisibility()
   UpdateTargetVisibility()
+  UpdateResizeGrips()
 
   if not casting then
     if bar:IsShown() then ApplyIdlePlaceholder() end
@@ -407,17 +571,22 @@ end
 -- timer drawn on top of the fill. `frameName` distinguishes the created
 -- widget names so registering both bars does not collide.
 local function BuildBarWidget(frameName)
+  local width = DEFAULT_WIDTH
+  local height = DEFAULT_HEIGHT
+  local iconSize = height
+  local barWidth = width - iconSize
+
   local widget = CreateFrame("Frame", frameName, UIParent)
-  widget:SetWidth(WIDTH)
-  widget:SetHeight(HEIGHT)
+  widget:SetWidth(width)
+  widget:SetHeight(height)
 
   local border = U.BorderSize()
 
   -- Left cell: the spell icon.
   local iconCell = U.CreatePanel(widget, {
     name = frameName .. "Icon",
-    width = ICON_SIZE,
-    height = HEIGHT,
+    width = iconSize,
+    height = height,
   })
   iconCell:SetPoint("TOPLEFT", widget, "TOPLEFT", 0, 0)
 
@@ -437,14 +606,14 @@ local function BuildBarWidget(frameName)
   -- drawn on top of it.
   local barCell = U.CreatePanel(widget, {
     name = frameName .. "Progress",
-    width = BAR_WIDTH,
-    height = HEIGHT,
+    width = barWidth,
+    height = height,
   })
   barCell:SetPoint("TOPLEFT", iconCell, "TOPRIGHT", 0, 0)
 
   widget.bar = U.CreateStatusBar(barCell, {
-    width = BAR_WIDTH - 2 * border,
-    height = HEIGHT - 2 * border,
+    width = barWidth - 2 * border,
+    height = height - 2 * border,
     color = M.color.cast,
     background = M.color.healthBg,
   })
@@ -461,7 +630,7 @@ local function BuildBarWidget(frameName)
   })
   if widget.name then
     widget.name:SetPoint("LEFT", widget.bar, "LEFT", 3, 0)
-    pcall(widget.name.SetWidth, widget.name, BAR_WIDTH - 34)
+    pcall(widget.name.SetWidth, widget.name, barWidth - 34)
   end
 
   -- The timer. A FontString's OVERLAY draw layer sits above the fill
@@ -484,6 +653,7 @@ local function Build()
   -- anchor the two cells hang off, so each cell keeps its own outline the way
   -- the reference layout shows them.
   bar = BuildBarWidget("QtUiPlusCastBar")
+  ApplyStoredSize(bar, "player")
   bar:Hide()
   SetCellsShown(false)
 
@@ -491,6 +661,7 @@ local function Build()
     label = "Cast bar",
     default = { point = "CENTER", relativePoint = "CENTER", x = 0, y = -220 },
   })
+  AttachResizeGrip(bar, "player", "castbar.player")
 
   -- Anchor-only target castbar (see the header note): built the same way as
   -- the player bar so its placeholder matches, but nothing ever calls
@@ -498,6 +669,7 @@ local function Build()
   -- the same reasoning as the player bar's idle placeholder -- a frame that
   -- only exists once it has data could never be dragged into place.
   targetBar = BuildBarWidget("QtUiPlusCastBarTarget")
+  ApplyStoredSize(targetBar, "target")
   U.SetStatusBarColor(targetBar.bar, M.Unpack(M.color.cast))
   pcall(targetBar.bar.SetMinMaxValues, targetBar.bar, 0, 1)
   pcall(targetBar.bar.SetValue, targetBar.bar, 0.4)
@@ -509,6 +681,11 @@ local function Build()
     label = "Target cast bar",
     default = { point = "CENTER", relativePoint = "CENTER", x = 0, y = -250 },
   })
+  AttachResizeGrip(targetBar, "target", "castbar.target")
+end
+
+function CB:OnInit()
+  sizeCfg = U.ModuleConfig("castbar", SIZE_DEFAULTS)
 end
 
 function CB:OnEnable()

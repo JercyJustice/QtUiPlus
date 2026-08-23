@@ -1,14 +1,13 @@
 -- QtUiPlus :: modules/auras.lua
 --
--- Buff and debuff icons above the player and target unit frames, each with the
--- radial wipe and countdown number the action bar uses, plus the "Unit Frames"
--- settings page that filters what they show.
+-- Buff and debuff icons on the player, target and party unit frames, each
+-- with the radial wipe and countdown number the action bar uses, plus the
+-- "Unit Frames" settings page that filters what they show.
 --
--- Scope: player and target only. Party/raid auras, weapon enchants, and
--- pfUI's whole buff/debuff module framework are not reproduced here.
--- Four independent rows (player/target buffs and debuffs), each with its
--- own edit-mode mover, matching QtUI's playerBuffs/playerDebuffs/
--- targetBuffs/targetDebuffs handles.
+-- Player and target rows are independent movers (matching QtUI's
+-- playerBuffs/playerDebuffs/targetBuffs/targetDebuffs). Party buffs and
+-- debuffs ride each member frame, glued to its right edge the way QtUI's
+-- PartyFrames.lua does -- they are not eight extra movers.
 -- Hovering an icon shows the shared client GameTooltip (SetUnitBuff /
 -- SetUnitDebuff), the same native widget xpbar.lua already owns for the rest
 -- tooltip -- not a second private tooltip frame.
@@ -112,8 +111,15 @@ local defaults = {
   playerBuffEnabled = true,
   targetEnabled     = true,
   targetBuffEnabled = true,
+  partyEnabled      = true,
+  partyBuffEnabled  = true,
   showTimers        = true,
   belowFrame        = false,
+  -- Pack icons from the right edge so the row grows leftward. Independent
+  -- for player and target: the player frame sits on the right, the target
+  -- on the left, and they usually want opposite directions.
+  playerGrowRight   = false,
+  targetGrowRight   = false,
   size              = 24,
   perRow            = 8,
   maxIcons          = 16,
@@ -516,6 +522,12 @@ local EMPTY_STOP = 2
 -- Gap between a row and whatever it sits against, on either side.
 local ROW_GAP = 4
 
+-- Party icons sit on the member frame, not on a mover. QtUI used 18px / 6
+-- icons in a single row to the right of each party member.
+local PARTY_ICON_SIZE = 18
+local PARTY_MAX = 6
+local PARTY_GAP = 4
+
 -- The countdown re-reads the clock this often. Matches modules/actionbar.lua's
 -- CD_TICK so the tenths shown in the last five seconds actually count down;
 -- the aura scan itself stays on the slower tick below.
@@ -661,20 +673,88 @@ end
 -- edge closest to it (top edge when shown above, bottom edge when shown
 -- below) and further rows stack away from the frame, so that edge stays put
 -- no matter how many auras are up.
-local function PlaceIcon(row, icon, slot, size, spacing, perRow, below)
+local function PlaceIcon(row, icon, slot, size, spacing, perRow, below, growRight)
   local column = math.mod(slot - 1, perRow)
   local line = math.floor((slot - 1) / perRow)
+  local x = column * (size + spacing)
+  local y = line * (size + spacing)
 
   icon:ClearAllPoints()
-  if below then
-    icon:SetPoint("TOPLEFT", row, "TOPLEFT",
-                  column * (size + spacing),
-                  -line * (size + spacing))
+  if growRight then
+    if below then
+      icon:SetPoint("TOPRIGHT", row, "TOPRIGHT", -x, -y)
+    else
+      icon:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -x, y)
+    end
   else
-    icon:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT",
-                  column * (size + spacing),
-                  line * (size + spacing))
+    if below then
+      icon:SetPoint("TOPLEFT", row, "TOPLEFT", x, -y)
+    else
+      icon:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", x, y)
+    end
   end
+end
+
+-- Which horizontal origin a player/target row keeps as icons come and go.
+-- Party rows stay left-to-right on the member frame and never use this.
+local function RowGrowsRight(row)
+  if not row or row.anchorId then return false end
+  if row.unit == "player" then
+    return U.GetAuraSetting("playerGrowRight") and true or false
+  end
+  if row.unit == "target" then
+    return U.GetAuraSetting("targetGrowRight") and true or false
+  end
+  return false
+end
+
+-- SetWidth on a BOTTOMLEFT-anchored row grows right; on BOTTOMRIGHT it grows
+-- left. Capture the chosen edge before the size write so a 2-icon row and an
+-- 8-icon row keep the same origin. Skipped while unlocked so the mover drag
+-- is not fighting a re-anchor every tick.
+local function SizeRow(row, width, height, growRight, below)
+  -- Party rows are glued to the member frame; re-pointing them to UIParent
+  -- would tear them off the party block.
+  if row.anchorId then
+    row:SetWidth(width)
+    row:SetHeight(height)
+    return
+  end
+
+  local unlocked = U.IsUnlocked and U.IsUnlocked()
+  local left, right, bottom, top
+  if not unlocked then
+    local ok, value
+    ok, value = pcall(row.GetLeft, row)
+    if ok then left = tonumber(value) end
+    ok, value = pcall(row.GetRight, row)
+    if ok then right = tonumber(value) end
+    ok, value = pcall(row.GetBottom, row)
+    if ok then bottom = tonumber(value) end
+    ok, value = pcall(row.GetTop, row)
+    if ok then top = tonumber(value) end
+  end
+
+  row:SetWidth(width)
+  row:SetHeight(height)
+
+  if unlocked then return end
+
+  local point, x, y
+  if growRight and below then
+    point, x, y = "TOPRIGHT", right, top
+  elseif growRight then
+    point, x, y = "BOTTOMRIGHT", right, bottom
+  elseif below then
+    point, x, y = "TOPLEFT", left, top
+  else
+    point, x, y = "BOTTOMLEFT", left, bottom
+  end
+  if not (point and x and y) then return end
+  pcall(function()
+    row:ClearAllPoints()
+    row:SetPoint(point, UIParent, "BOTTOMLEFT", x, y)
+  end)
 end
 
 -- Anchors the row itself to the frame edge matching the current position
@@ -861,8 +941,13 @@ local function RefreshRow(row, offset)
 
   -- Empty shell in edit mode so the mover handle stays grabable with no unit
   -- and no auras (same idea as unitframes.lua's unlocked target-of-target).
+  -- Party rows are not movers; an empty member just hides them.
   if not UnitExists(row.unit) then
     for i = 1, table.getn(row.icons) do HideIcon(row.icons[i]) end
+    if row.anchorId then
+      row:Hide()
+      return 0
+    end
     if U.IsUnlocked and U.IsUnlocked() then
       local size = U.GetAuraSetting("size")
       local spacing = U.GetAuraSetting("spacing")
@@ -875,15 +960,36 @@ local function RefreshRow(row, offset)
     return 0
   end
 
-  local size = U.GetAuraSetting("size")
+  local party = row.anchorId and true or false
+  local size = party and PARTY_ICON_SIZE or U.GetAuraSetting("size")
   local spacing = U.GetAuraSetting("spacing")
-  local perRow = U.GetAuraSetting("perRow")
-  local maxIcons = U.GetAuraSetting(row.harmful and "maxIcons" or "maxBuffs")
-  local below = U.GetAuraSetting("belowFrame")
+  local perRow = party and PARTY_MAX or U.GetAuraSetting("perRow")
+  local maxIcons = party and PARTY_MAX
+                   or U.GetAuraSetting(row.harmful and "maxIcons" or "maxBuffs")
+  local below = party or U.GetAuraSetting("belowFrame")
+  local growRight = (not party) and RowGrowsRight(row)
   local timers = U.GetAuraSetting("showTimers")
 
-  -- Independent movers own placement. Do not re-anchor to the unit frame
-  -- every tick -- that would fight core/mover.lua's stored position.
+  -- Player/target movers own placement. Party rows are glued to the member
+  -- frame (QtUI PartyFrames: LEFT of frame RIGHT) and must re-point here so
+  -- a live resize of the party block keeps them attached.
+  if party then
+    local host = type(U.GetUnitFrame) == "function" and U.GetUnitFrame(row.anchorId)
+    if not host then
+      row:Hide()
+      return 0
+    end
+    row:ClearAllPoints()
+    if row.harmful then
+      row:SetPoint("TOPLEFT", host, "RIGHT", PARTY_GAP, 12)
+    else
+      row:SetPoint("TOPLEFT", host, "RIGHT", PARTY_GAP, -6)
+    end
+    local levelOk, level = pcall(host.GetFrameLevel, host)
+    if levelOk and tonumber(level) then
+      pcall(row.SetFrameLevel, row, tonumber(level) + 5)
+    end
+  end
 
   local store = UnitStore(row.unit)
   local bucket = store and (row.harmful and store.harmful or store.helpful)
@@ -932,7 +1038,7 @@ local function RefreshRow(row, offset)
         -- debuff ahead of this one is filtered out by PassesFilter; the
         -- tooltip must key off the real index or it would show the wrong aura.
         icon.qtpIndex = i
-        PlaceIcon(row, icon, shown, size, spacing, perRow, below)
+        PlaceIcon(row, icon, shown, size, spacing, perRow, below, growRight)
         ApplyIcon(icon, texture, count,
                   row.harmful and TypeColor(debuffType) or BUFF_COLOR,
                   size, entry, now, timers)
@@ -948,13 +1054,12 @@ local function RefreshRow(row, offset)
     local lines = math.floor((shown - 1) / perRow) + 1
     local columns = shown < perRow and shown or perRow
     local height = lines * (size + spacing)
-    row:SetWidth(columns * (size + spacing))
-    row:SetHeight(height)
+    SizeRow(row, columns * (size + spacing), height, growRight, below)
     row:Show()
     return height
   end
 
-  if U.IsUnlocked and U.IsUnlocked() then
+  if (not party) and U.IsUnlocked and U.IsUnlocked() then
     row:SetWidth(size * 4 + spacing * 3)
     row:SetHeight(size)
     row:Show()
@@ -977,9 +1082,16 @@ local function RefreshPlayer()
   RefreshRow(rows.playerBuff, 0)
 end
 
+local function RefreshPartyMember(unit)
+  RefreshRow(rows[unit], 0)
+  RefreshRow(rows[unit .. "Buff"], 0)
+end
+
 local function RefreshAll()
-  RefreshPlayer()
-  RefreshTarget()
+  local r
+  for r = 1, table.getn(rowOrder) do
+    RefreshRow(rowOrder[r], 0)
+  end
 end
 
 -- Only the unit the event carries, when it carries a usable token.
@@ -988,6 +1100,8 @@ local function RefreshUnitToken(token)
     RefreshTarget()
   elseif token == "player" then
     RefreshPlayer()
+  elseif type(token) == "string" and string.sub(token, 1, 5) == "party" then
+    RefreshPartyMember(token)
   else
     RefreshAll()
   end
@@ -1089,12 +1203,15 @@ end
 -- ---------------------------------------------------------------------------
 -- Build
 -- ---------------------------------------------------------------------------
-local function BuildRow(id, unit, harmful, setting, mover)
-  local size = U.GetAuraSetting("size")
+local function BuildRow(id, unit, harmful, setting, mover, options)
+  options = options or {}
+  local size = options.anchorId and PARTY_ICON_SIZE or U.GetAuraSetting("size")
   local spacing = U.GetAuraSetting("spacing")
 
-  -- Parent UIParent, not the unit frame: each row is a QtUI-style independent
-  -- mover (playerBuffs / playerDebuffs / targetBuffs / targetDebuffs).
+  -- Parent UIParent, not the unit frame: player/target rows are independent
+  -- movers. Party rows still live on UIParent and are pointed at the member
+  -- frame each refresh, so a hidden party member does not take its auras
+  -- with it via parent alpha (rendering.parent_alpha_not_propagated).
   local row = CreateFrame("Frame", "QtUiPlusAuraRow" .. id, UIParent)
   row:SetWidth(size * 4 + spacing * 3)
   row:SetHeight(size)
@@ -1104,6 +1221,7 @@ local function BuildRow(id, unit, harmful, setting, mover)
   row.unit = unit
   row.harmful = harmful
   row.setting = setting
+  row.anchorId = options.anchorId
   row.icons = {}
   row.names = {}
   row:Hide()
@@ -1146,8 +1264,12 @@ local TOGGLES = {
   { key = "playerBuffEnabled", text = "Player buffs",    column = 1, row = 0 },
   { key = "targetEnabled",     text = "Target debuffs",  column = 0, row = 1 },
   { key = "targetBuffEnabled", text = "Target buffs",    column = 1, row = 1 },
-  { key = "showTimers",        text = "Timers on aura icons",  column = 0, row = 2 },
-  { key = "belowFrame",        text = "Grow aura rows downward", column = 1, row = 2 },
+  { key = "partyEnabled",      text = "Party debuffs",   column = 0, row = 2 },
+  { key = "partyBuffEnabled",  text = "Party buffs",     column = 1, row = 2 },
+  { key = "showTimers",        text = "Timers on aura icons",  column = 0, row = 3 },
+  { key = "belowFrame",        text = "Grow aura rows downward", column = 1, row = 3 },
+  { key = "playerGrowRight",   text = "Player auras grow from the right", column = 0, row = 4 },
+  { key = "targetGrowRight",   text = "Target auras grow from the right", column = 1, row = 4 },
 }
 
 -- Laid out 2 per row (column, row) so the list reads as a table instead of a
@@ -1193,7 +1315,7 @@ local function BuildSettingsPage(parent)
   local filterHeader = U.CreateSectionHeader(parent, {
     text = "Show Debuffs By Dispel Type",
     width = PAGE_WIDTH,
-    y = -128,
+    y = -180,
   })
   table.insert(widgets, filterHeader)
 
@@ -1210,7 +1332,7 @@ local function BuildSettingsPage(parent)
       end,
     })
     check.SetPoint("TOPLEFT", parent, "TOPLEFT",
-                   spec.column * FILTER_COLUMN_X, -158 - spec.row * 26)
+                   spec.column * FILTER_COLUMN_X, -210 - spec.row * 26)
     controls[spec.key] = check
     table.insert(widgets, check)
   end
@@ -1246,7 +1368,7 @@ local function BuildSettingsPage(parent)
   local refreshColors
   if type(U.BuildUnitFrameColorSettings) == "function" then
     local colorWidgets
-    colorWidgets, refreshColors = U.BuildUnitFrameColorSettings(parent, -296)
+    colorWidgets, refreshColors = U.BuildUnitFrameColorSettings(parent, -356)
     local n
     for n = 1, table.getn(colorWidgets) do
       table.insert(widgets, colorWidgets[n])
@@ -1294,6 +1416,14 @@ function A:OnEnable()
     default = { point = "BOTTOMLEFT", relativePoint = "BOTTOM", x = 75, y = 205 },
   })
 
+  local p
+  for p = 1, 4 do
+    local unit = "party" .. p
+    BuildRow(unit, unit, true, "partyEnabled", nil, { anchorId = unit })
+    BuildRow(unit .. "Buff", unit, false, "partyBuffEnabled", nil,
+             { anchorId = unit })
+  end
+
   if table.getn(rowOrder) == 0 then
     U.Error("aura rows could not be created")
     return
@@ -1302,7 +1432,15 @@ function A:OnEnable()
   -- UNIT_AURA is the one aura event observed firing on this client
   -- (events.json); PLAYER_AURAS_CHANGED registered but was never seen, so it is
   -- registered as a free accelerator rather than relied on.
-  U.RegisterEvent("UNIT_AURA", function(event, unit) RefreshUnitToken(unit) end)
+  U.RegisterEvent("UNIT_AURA", function(event, unit)
+    -- QtUI PartyFrames.lua: scanning party auras in the same frame one is
+    -- applied can access-violate this client. The 0.2s poll still catches
+    -- them; this only skips the same-frame scan.
+    if type(unit) == "string" and string.sub(unit, 1, 5) == "party" then
+      return
+    end
+    RefreshUnitToken(unit)
+  end)
   U.RegisterEvent("PLAYER_AURAS_CHANGED", function() RefreshAll() end)
   -- round 3: deferred one driver tick, same reasoning as
   -- core/compat.lua's target-group sweep -- this used to scan up to 24 debuff
@@ -1317,6 +1455,7 @@ function A:OnEnable()
     end)
   end)
   U.RegisterEvent("PLAYER_ENTERING_WORLD", function() RefreshAll() end)
+  U.RegisterEvent("PARTY_MEMBERS_CHANGED", function() RefreshAll() end)
 
   -- The mechanism, not an optimisation: with no duration return there is
   -- nothing to expire an icon locally, so an aura that falls off is only
