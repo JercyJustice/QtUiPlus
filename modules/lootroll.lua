@@ -79,11 +79,19 @@ local function BuildAnchor()
   if type(U.RegisterMover) == "function" then
     U.RegisterMover("lootroll.anchor", frame, {
       label = "Loot Roll",
+      -- Deliberately off-centre. USER_CONFIRMED_INGAME the thing covering the
+       -- card is the target's nameplate -- modules/nameplates.lua gives the
+      -- target plate the accent border and writes U.FormatHealthText("target")
+      -- across it, which is the "Dead" / "551 - 58%" bar that kept appearing
+      -- inside the window. A plate floats over the unit, so it sits near the
+      -- middle of the screen; a card centred there lines up with it every time.
+      -- Starting left of centre keeps the two apart without the user having to
+      -- move anything, and the mover is there for those who want it elsewhere.
       default = {
-        point = "TOP",
-        relativePoint = "TOP",
-        x = 0,
-        y = -180,
+        point = "TOPLEFT",
+        relativePoint = "TOPLEFT",
+        x = 24,
+        y = -160,
       },
     })
   end
