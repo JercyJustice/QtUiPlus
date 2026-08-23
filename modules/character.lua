@@ -263,6 +263,12 @@ local STAT_DROP_H = 18
 local STAT_ROWS = 6
 local STAT_GAP = 8
 local STAT_LABEL_W = 64
+-- Both stat dropdowns are one widget anchored to statOverlay at one y, so on
+-- paper they cannot disagree; USER_CONFIRMED_INGAME they still do, the left box
+-- drawing this many pixels above the right. Measured off the client rather than
+-- derived, so it lives here as a named number: raise it to drop the Base Stats
+-- box further, set it to 0 if a later client build stops needing it.
+local STAT_LEFT_DROP_Y = 3
 local STAT_CATS = {
   { key = "base",          label = "Base Stats" },
   { key = "melee",         label = "Melee" },
@@ -624,7 +630,7 @@ PlaceStatSelect = function()
   SizeButton(leftBtn)
   if leftBtn then
     pcall(leftBtn.SetPoint, leftBtn, "BOTTOMLEFT", statOverlay, "BOTTOMLEFT",
-          0, bottom)
+          0, bottom - STAT_LEFT_DROP_Y)
   end
   HideCaption(statLeft)
 
