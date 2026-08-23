@@ -327,6 +327,25 @@ local function HideDuplicateName(frame, keep, text)
   end
 end
 
+-- A roll window is on screen for seconds, which makes "run this command while
+-- it is up" a poor way to collect evidence about it -- one missed step and the
+-- window is gone. Each roll therefore records its own snapshot into
+-- QtUiPlusDiagDB.rollAuto, so the file holds the last few rolls after any
+-- reload with nothing typed. U.AppendDiagnostic caps the list, so this cannot
+-- grow the SavedVariables file without bound.
+local function RecordDump(frame)
+  if type(U.LootRollDump) ~= "function" then return end
+  if type(U.AppendDiagnostic) ~= "function" then return end
+  -- Skin also runs at load, over four frames that are not on screen. Only a
+  -- roll that is actually up is worth a slot in the capped list.
+  if not frame or not frame.IsShown then return end
+  local ok, shown = pcall(frame.IsShown, frame)
+  if not ok or not shown then return end
+  pcall(function()
+    U.AppendDiagnostic("rollAuto", U.LootRollDump())
+  end)
+end
+
 local function Skin(name, index)
   local frame = U.G(name)
   if not frame then return end
@@ -364,6 +383,7 @@ local function Skin(name, index)
   StyleName(name, frame, icon, buttonCount, quality)
   StyleTimer(name, frame)
   HideDuplicateName(frame, U.G(name .. "Name"), itemName)
+  RecordDump(frame)
 end
 
 local function Attach()

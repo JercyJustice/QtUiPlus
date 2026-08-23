@@ -959,7 +959,12 @@ end
 
 -- The dump is a written record, not chat output: it runs to dozens of lines,
 -- which is exactly the flood SaveDiagnostic exists for. Chat gets one line.
-local function ShowLootRollDump()
+--
+-- Exposed on U so modules/lootroll.lua can take the same snapshot by itself
+-- when a roll opens. Asking for a typed command at the moment a timed window is
+-- on screen turned out to be a bad way to collect this: the roll is gone in
+-- seconds, and one missed step means another round trip.
+function U.LootRollDump()
   local lines = {}
   local function Add(object, label)
     if not object then return end
@@ -1026,6 +1031,11 @@ local function ShowLootRollDump()
     end
   end
 
+  return lines
+end
+
+local function ShowLootRollDump()
+  local lines = U.LootRollDump()
   SaveDiagnostic("roll", lines)
   U.Print("roll: " .. table.getn(lines) .. " lines saved to QtUiPlusDiagDB.roll" ..
           " - |cffffff00/reload|r to write them out")
