@@ -1637,6 +1637,18 @@ local function FillDetailBars(frame, rows, left, width, height, color, y0, offse
       bar:SetStatusBarColor(tint[1], tint[2], tint[3], .9)
       bar.left:SetText((i + offset) .. ". " .. (spec.label or ""))
       bar.right:SetText(spec.right or "")
+      local textH = DETAIL_ROW - 4
+      if textH < 8 then textH = 8 end
+      local leftW = math.floor(width * .58)
+      if leftW < 40 then leftW = 40 end
+      PlaceBox(bar.left, bar, 4, 1, leftW, textH)
+      if bar.left.SetJustifyH then pcall(bar.left.SetJustifyH, bar.left, "LEFT") end
+      if bar.left.Show then pcall(bar.left.Show, bar.left) end
+      local rightW = width - leftW - 8
+      if rightW < 28 then rightW = 28 end
+      PlaceBox(bar.right, bar, width - rightW - 4, 1, rightW, textH)
+      if bar.right.SetJustifyH then pcall(bar.right.SetJustifyH, bar.right, "RIGHT") end
+      if bar.right.Show then pcall(bar.right.Show, bar.right) end
       bar.spell = spec.spell
       bar.row = spec.row
       bar.unit = spec.unit
@@ -1838,9 +1850,10 @@ RefreshOverview = function()
     if frame.EnableMouse then frame:EnableMouse(true) end
     if frame.Show then pcall(frame.Show, frame) end
   end
-  frame.title:ClearAllPoints()
-  frame.title:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 10, height - 16)
-  frame.title:SetPoint("TOPRIGHT", frame, "BOTTOMLEFT", 8 + ROSTER_W, height - 4)
+  PlaceBox(frame.title, frame, 10, height - 16, ROSTER_W - 4, 12)
+  if frame.title.SetJustifyH then pcall(frame.title.SetJustifyH, frame.title, "LEFT") end
+  frame.title:SetText(title)
+  if frame.title.Show then pcall(frame.title.Show, frame.title) end
   if frame.close and frame.close.SetFrameLevel then frame.close:SetFrameLevel(190) end
   if frame.compare and frame.compare.SetFrameLevel then frame.compare:SetFrameLevel(190) end
   if frame.compare.text then
@@ -1849,6 +1862,11 @@ RefreshOverview = function()
     else
       frame.compare.text:SetText("Compare")
     end
+    PlaceBox(frame.compare.text, frame.compare, 4, 1, ROSTER_W - 8, 14)
+    if frame.compare.text.SetJustifyH then
+      pcall(frame.compare.text.SetJustifyH, frame.compare.text, "CENTER")
+    end
+    if frame.compare.text.Show then pcall(frame.compare.text.Show, frame.compare.text) end
   end
   if frame.compare.EnableMouse then frame.compare:EnableMouse(true) end
   if frame.compare.Show then pcall(frame.compare.Show, frame.compare) end
@@ -1903,6 +1921,14 @@ RefreshOverview = function()
         bar:SetStatusBarColor(r * .7, g * .7, b * .7, .75)
       end
       bar.left:SetText(label)
+      PlaceBox(bar.left, bar, 4, 1, math.floor(ROSTER_W * .62), DETAIL_ROW - 4)
+      if bar.left.SetJustifyH then pcall(bar.left.SetJustifyH, bar.left, "LEFT") end
+      if bar.left.Show then pcall(bar.left.Show, bar.left) end
+      local rightW = ROSTER_W - math.floor(ROSTER_W * .62) - 8
+      if rightW < 24 then rightW = 24 end
+      PlaceBox(bar.right, bar, ROSTER_W - rightW - 4, 1, rightW, DETAIL_ROW - 4)
+      if bar.right.SetJustifyH then pcall(bar.right.SetJustifyH, bar.right, "RIGHT") end
+      if bar.right.Show then pcall(bar.right.Show, bar.right) end
       bar.unit = name
       bar.row = row
       if bar.Show then pcall(bar.Show, bar) end
@@ -1933,10 +1959,10 @@ RefreshOverview = function()
   else
     sub = "No player selected"
   end
-  frame.sub:ClearAllPoints()
-  frame.sub:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", paneLeft, height - 16)
-  frame.sub:SetPoint("TOPRIGHT", frame, "BOTTOMLEFT", width - 22, height - 4)
+  PlaceBox(frame.sub, frame, paneLeft, height - 16, paneW - 14, 12)
+  if frame.sub.SetJustifyH then pcall(frame.sub.SetJustifyH, frame.sub, "LEFT") end
   frame.sub:SetText(sub)
+  if frame.sub.Show then pcall(frame.sub.Show, frame.sub) end
 
   local rows
   local tint = { .45, .45, .48 }
