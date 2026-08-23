@@ -591,10 +591,15 @@ local function MakeStatRows(parent, column)
 end
 
 -- Emberveil ignores TOP offsets on some widgets, so the Melee CreateSelect
--- sat a few pixels off the Base Stats box when both used TOPLEFT. Pin the
--- left box with SetWidth/Height + one BOTTOMLEFT (frame recipe), then hang
--- Melee off its BOTTOMRIGHT so they share a baseline. Do not add a second
--- point: two points plus SetWidth stretches the button.
+-- sat a few pixels off the Base Stats box when both used TOPLEFT. The fix that
+-- followed -- pinning the left box with SetWidth/Height + one BOTTOMLEFT (the
+-- frame recipe) and hanging Melee off its BOTTOMRIGHT -- did not close the gap
+-- either: USER_CONFIRMED_INGAME, Melee still drew a couple of pixels below
+-- Base Stats, which read as the left dropdown's label sitting high next to the
+-- right one. The sibling anchor is gone; both boxes now get the identical
+-- recipe against statOverlay and differ only in x, so there is no relative
+-- placement left for the client to resolve differently between them. Do not
+-- add a second point to either: two points plus SetWidth stretches the button.
 PlaceStatSelect = function()
   if not statOverlay then return end
   local height = STAT_DROP_H + 4 + STAT_ROWS * STAT_ROW_H
@@ -625,10 +630,7 @@ PlaceStatSelect = function()
 
   local rightBtn = statRight and statRight.button
   SizeButton(rightBtn)
-  if rightBtn and leftBtn then
-    pcall(rightBtn.SetPoint, rightBtn, "BOTTOMLEFT", leftBtn, "BOTTOMRIGHT",
-          STAT_GAP, 0)
-  elseif rightBtn then
+  if rightBtn then
     pcall(rightBtn.SetPoint, rightBtn, "BOTTOMLEFT", statOverlay, "BOTTOMLEFT",
           STAT_COL_W + STAT_GAP, bottom)
   end
