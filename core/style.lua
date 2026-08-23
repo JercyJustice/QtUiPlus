@@ -984,6 +984,17 @@ end
 -- here re-centres every button label in every QtUiPlus interface at once.
 U.BUTTON_LABEL_OFFSET_Y = -2
 
+-- Select controls (U.CreateSelect) and the native dropdown skin
+-- (core/dropdown.lua) do not use that offset: their label is pinned to the
+-- control's left edge rather than centred, and this client leaves the glyphs
+-- against an edge of a region whose height differs from the box instead of
+-- centring them in it. Both therefore clamp the label region to the control
+-- height and set SetJustifyV("CENTER") explicitly; what is left at that centre
+-- is the one pixel USER_CONFIRMED_INGAME on the native control, which is this
+-- value. Without the clamp the character-sheet stat dropdowns sat a few pixels
+-- low, which is the bug this constant and its clamp were introduced for.
+U.SELECT_LABEL_OFFSET_Y = -1
+
 -- Nine-point placement used by hotkeys and unit-frame labels. Single-edge
 -- anchors only: fonts.stretched_justification_ignored means a FontString
 -- stretched corner-to-corner with SetJustifyH does not actually justify.

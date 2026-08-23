@@ -515,19 +515,33 @@ function U.CreateSelect(parent, options)
     color = M.color.accent,
     inherits = "GameFontNormalSmall",
   })
+  -- U.CreateButton hands back a label region 4 units shorter than the button,
+  -- centred on it. That is right for a CENTER-anchored button caption, but the
+  -- select pins its label to the left edge instead, and this client does not
+  -- centre a FontString inside a region of a different height -- the glyphs sat
+  -- toward the bottom, which is what put the character-sheet stat dropdowns a
+  -- few pixels below the middle of their box. Clamp the region to the control
+  -- height and centre it explicitly (the recipe core/dropdown.lua already uses
+  -- for native dropdown controls) so only the shared one-pixel residual in
+  -- U.SELECT_LABEL_OFFSET_Y is left to correct. The arrow rides the same
+  -- offset so the glyph and the value keep one baseline.
+  local labelY = U.SELECT_LABEL_OFFSET_Y or -1
+
   if arrow then
-    arrow:SetPoint("RIGHT", button, "RIGHT", -6, U.BUTTON_LABEL_OFFSET_Y or -2)
+    arrow:SetPoint("RIGHT", button, "RIGHT", -6, labelY)
     arrow:SetText("v")
   end
 
   if button.label then
     pcall(button.label.ClearAllPoints, button.label)
-    pcall(button.label.SetPoint, button.label, "LEFT", button, "LEFT", 8,
-          U.BUTTON_LABEL_OFFSET_Y or -2)
+    pcall(button.label.SetPoint, button.label, "LEFT", button, "LEFT", 8, labelY)
     pcall(button.label.SetPoint, button.label, "RIGHT",
-          arrow or button, arrow and "LEFT" or "RIGHT", -4,
-          U.BUTTON_LABEL_OFFSET_Y or -2)
+          arrow or button, arrow and "LEFT" or "RIGHT", -4, labelY)
     pcall(button.label.SetJustifyH, button.label, "LEFT")
+    pcall(button.label.SetHeight, button.label, height)
+    if button.label.SetJustifyV then
+      pcall(button.label.SetJustifyV, button.label, "CENTER")
+    end
     pcall(button.label.SetWidth, button.label, math.max(1, width - 28))
   end
 

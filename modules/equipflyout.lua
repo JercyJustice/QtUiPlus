@@ -68,13 +68,43 @@ local function WindowOpen(name)
   return ok and shown and true or false
 end
 
+local function FlyoutOpen()
+  if activeSlot then return true end
+  if not flyout or not flyout.IsShown then return false end
+  local ok, shown = pcall(flyout.IsShown, flyout)
+  return ok and shown and true or false
+end
+
+-- Only a tooltip this module put on screen may be taken down here. Wiki
+-- GameTooltip#isowned: true when `frame` is the SetOwner target, and the flyout
+-- buttons are the only frames this module ever makes an owner.
+local function OwnsTooltip(tip)
+  if not tip or not tip.IsOwned then return false end
+  local i
+  for i = 1, table.getn(buttons) do
+    local ok, owned = pcall(tip.IsOwned, tip, buttons[i])
+    if ok and owned then return true end
+  end
+  return false
+end
+
+-- Tick calls this every 0.08s whenever the paperdoll is shut or Alt is not
+-- held, which is nearly always. It used to hide GameTooltip unconditionally on
+-- each of those ticks, so every tooltip in the interface -- bags, action bars,
+-- units, quests, none of them anything to do with this module -- was taken down
+-- within 80ms of appearing. Nothing is touched now unless a flyout is actually
+-- open, and the tooltip only when a flyout button owns it: the buttons hide
+-- their own tooltip in OnLeave, so the hide here is just the case where the
+-- list is pulled out from under a hovered button and that OnLeave never fires.
 local function HideFlyout()
+  local open = FlyoutOpen()
   activeSlot = nil
   activeInv = nil
+  if not open then return end
   if flyout then pcall(flyout.Hide, flyout) end
+  if U.HidePricePanel then U.HidePricePanel() end
   local tip = U.G("GameTooltip")
-  if tip and U.HidePricePanel then U.HidePricePanel() end
-  if tip then pcall(tip.Hide, tip) end
+  if tip and OwnsTooltip(tip) then pcall(tip.Hide, tip) end
 end
 
 local function EquipLocOf(link)

@@ -17,8 +17,11 @@ local CONTROL_HEIGHT = 28
 -- The -5 riding-high nudge was tuned for the old 14-unit box; at the doubled
 -- height the clamped SetHeight + explicit CENTER justify below already lands
 -- the glyph on the control's true centre. USER_CONFIRMED_INGAME: still 1px
--- high at that centre, so a small residual nudge remains.
-local CONTROL_TEXT_Y = -1
+-- high at that centre, so a small residual nudge remains. U.CreateSelect
+-- reaches the same centre by the same clamp-and-centre route, so the residual
+-- is one shared constant (core/style.lua) rather than a number per dropdown
+-- flavour.
+local CONTROL_TEXT_Y = U.SELECT_LABEL_OFFSET_Y or -1
 
 -- Compact tick box for list rows. Native rows are 16 high, so this is smaller
 -- than the 14-unit settings checkbox and uses a matching smaller accent mark.
