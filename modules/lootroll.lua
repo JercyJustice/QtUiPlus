@@ -43,10 +43,22 @@ local BTN_GAP = 4
 local BAR_H = 4
 local NAME_GAP = 8
 
--- The frame's own size is left alone. Multiple rolls stack, and the client owns
--- where each frame sits; resizing them here would be QtUiPlus deciding the
--- spacing of a layout it does not drive. Everything below anchors to the
--- frame's edges instead, so the card is correct at whatever size it arrives.
+-- USER_CONFIRMED_INGAME: laying out inside the stock frame's own proportions
+-- left barely 60 units for the name, so "Mage-Eye Blunderbuss" wrapped onto two
+-- lines and ran under the icon. The card gets its own size instead.
+--
+-- Only *shrinking* the height is safe for the stack: a roll frame is positioned
+-- by the client, and the next one sits below it, so a shorter card closes the
+-- gap while a taller one would overlap. The width is free either way -- the
+-- stack is vertical.
+local CARD_W = 300
+local CARD_H = 44
+
+-- What is left for the name once the icon, the three buttons and the paddings
+-- have taken their share. Derived from the constants above rather than measured
+-- off the frame, so it cannot go negative on a build whose GetWidth surprises.
+local NAME_W = CARD_W - PAD - ICON - NAME_GAP
+                       - (BTN * 3 + BTN_GAP * 2) - NAME_GAP - PAD
 
 local function Quality(frame)
   local rollID = frame and frame.rollID
@@ -120,26 +132,14 @@ local function StyleName(name, frame, icon, leftmostButton, quality)
   U.SetStockFont(label, M.fontSize.normal, color)
 
   -- fonts.stretched_justification_ignored: one anchor plus an explicit width,
-  -- never a corner-to-corner stretch.
-  local width = 120
-  local fw
-  if frame.GetWidth then
-    local ok, value = pcall(frame.GetWidth, frame)
-    if ok then fw = tonumber(value) end
-  end
-  if fw then
-    width = fw - PAD - ICON - NAME_GAP - PAD
-    if leftmostButton then
-      width = width - (BTN * 3 + BTN_GAP * 2 + NAME_GAP)
-    end
-    if width < 40 then width = 40 end
-  end
-
+  -- never a corner-to-corner stretch. The height is pinned to one line as well:
+  -- a FontString given a width wraps, and this card has room for one line.
   pcall(function()
     label:ClearAllPoints()
     label:SetPoint("LEFT", icon or frame, icon and "RIGHT" or "LEFT",
                    icon and NAME_GAP or PAD, 0)
-    label:SetWidth(width)
+    label:SetWidth(NAME_W)
+    label:SetHeight(M.fontSize.normal + 4)
   end)
   pcall(label.SetJustifyH, label, "LEFT")
   if label.SetJustifyV then pcall(label.SetJustifyV, label, "CENTER") end
@@ -164,11 +164,36 @@ local function StyleTimer(name, frame)
   end)
 end
 
+-- USER_CONFIRMED_INGAME: the item name draws twice -- once in $parentName (the
+-- one styled below, confirmed by its quality colour landing on it) and once in
+-- a second FontString this frame carries, which sat in white above the card.
+-- U.StripStockTextures only takes Textures, so that one survived it. The label
+-- being styled is kept and every other FontString on the frame is faded out;
+-- alpha rather than Hide, since the client re-shows its own regions when the
+-- frame is reused for the next roll.
+local function HideExtraLabels(frame, keep)
+  if not frame or not frame.GetRegions then return end
+  local ok, regions = pcall(function() return { frame:GetRegions() } end)
+  if not ok or type(regions) ~= "table" then return end
+  local i
+  for i = 1, table.getn(regions) do
+    local region = regions[i]
+    if region and region ~= keep and region.GetObjectType then
+      local typeOk, objectType = pcall(region.GetObjectType, region)
+      if typeOk and objectType == "FontString" and region.SetAlpha then
+        pcall(region.SetAlpha, region, 0)
+      end
+    end
+  end
+end
+
 local function Skin(name)
   local frame = U.G(name)
   if not frame then return end
 
   U.StripStockTextures(frame)
+  pcall(frame.SetWidth, frame, CARD_W)
+  pcall(frame.SetHeight, frame, CARD_H)
   U.CreateBackdrop(frame, {
     -- Opaque, unlike the usual 0.85 panel fill: this window opens over the
     -- world and over whatever the interface is already drawing, and a roll has
@@ -177,15 +202,19 @@ local function Skin(name)
     background = { 0.05, 0.05, 0.05, 0.96 },
     border = M.color.border,
   })
-  -- Above the game panels: a roll expires on its own, so it must not end up
-  -- behind a bag or the character sheet that happens to be open.
-  U.RaiseGamePanel(frame, "DIALOG")
+  -- A roll expires on its own, so it must not end up behind anything. DIALOG
+  -- was not enough: USER_CONFIRMED_INGAME the target nameplate still drew over
+  -- the card, so whatever layer this client gives nameplates outranks the one
+  -- game panels use. FULLSCREEN_DIALOG clears that and still leaves tooltips on
+  -- top, which is the one thing that should be able to cover a roll.
+  U.RaiseGamePanel(frame, "FULLSCREEN_DIALOG")
 
   local quality = Quality(frame)
   local icon = StyleIcon(name, quality)
   local leftmost = StyleButtons(name, frame)
   StyleName(name, frame, icon, leftmost, quality)
   StyleTimer(name, frame)
+  HideExtraLabels(frame, U.G(name .. "Name"))
 end
 
 local function Attach()
