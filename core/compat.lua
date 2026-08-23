@@ -370,6 +370,32 @@ local targetVisualEpoch = 0
 local TARGET_LEVEL_RETRY_PASSES = 12
 local targetLevelRetryPasses = 0
 
+-- Named target visuals the native renderer rewrites after PLAYER_TARGET_CHANGED
+-- and on UNIT_HEALTH/UNIT_MANA. StatusBar/Texture here ignore UIObject alpha,
+-- so a friendly player's ticking health bar brings the stock fill back even
+-- after SetAlpha(0). Punching this short list is cheaper than re-tearing the
+-- whole target group on every health event.
+local TARGET_PUNCH_NAMES = {
+  { "TargetFrame" },
+  { "TargetFrameTexture", "texture" },
+  { "TargetFrameTextureFrame", "texture" },
+  { "TargetHealthBar", "bar" },
+  { "TargetManaBar", "bar" },
+  { "TargetFrameHealthBar", "bar" },
+  { "TargetFrameManaBar", "bar" },
+  { "TargetHealthBarText", "text" },
+  { "TargetManaBarText", "text" },
+  { "TargetFrameHealthBarText", "text" },
+  { "TargetFrameManaBarText", "text" },
+  { "TargetPortrait", "texture" },
+  { "TargetHighLevelTexture", "texture" },
+  { "TargetName", "text" },
+  { "TargetLevelText", "text" },
+  { "TargetDeadText", "text" },
+  { "TargetFrameBackground", "texture" },
+  { "TargetFrameNameBackground", "texture" },
+}
+
 -- Hoisted pcall bodies. These were anonymous closures built fresh for every
 -- object on every sweep; as named upvalues they allocate nothing and keep the
 -- one-pcall-per-step failure isolation the closures had.
@@ -575,7 +601,23 @@ local function KillNativeObject(object, visualOnly, visualKind)
     if alreadyMarked then
       alphaKnown, alphaAnswer = false, nil
       pcall(ReadAlpha, object)
-      if alphaKnown and alphaAnswer == 0 and contentCurrent then return end
+      if alphaKnown and alphaAnswer == 0 and contentCurrent then
+        -- Alpha 0 is not enough for this family's StatusBar/Texture renderers:
+        -- they ignore it and native UNIT_HEALTH rewrites the fill. Skip only
+        -- when the actual content is still empty.
+        local dirty = false
+        if visualKind == "bar" and object.GetValue then
+          local ok, value = pcall(object.GetValue, object)
+          dirty = ok and tonumber(value) and tonumber(value) ~= 0
+        elseif visualKind == "texture" and object.GetTexture then
+          local ok, tex = pcall(object.GetTexture, object)
+          dirty = ok and type(tex) == "string" and tex ~= ""
+        elseif visualKind == "text" and object.GetText then
+          local ok, text = pcall(object.GetText, object)
+          dirty = ok and type(text) == "string" and text ~= ""
+        end
+        if not dirty then return end
+      end
     end
 
     statTornDown = statTornDown + 1
@@ -649,6 +691,25 @@ local function KillNativeObject(object, visualOnly, visualKind)
   if level >= 3 then pcall(DropMouse, object) end
 end
 
+local function PunchTargetVisuals()
+  local i
+  for i = 1, table.getn(TARGET_PUNCH_NAMES) do
+    local spec = TARGET_PUNCH_NAMES[i]
+    local object = ResolveNativeObject(spec[1])
+    if object then
+      pcall(ZeroAlpha, object)
+      local kind = spec[2]
+      if kind == "bar" then
+        pcall(ClearBarVisual, object)
+      elseif kind == "texture" then
+        pcall(ClearTextureVisual, object)
+      elseif kind == "text" then
+        pcall(ClearTextVisual, object)
+      end
+    end
+  end
+end
+
 local function SweepNames(names)
   if not names then return end
   local i
@@ -686,16 +747,13 @@ local function ApplyNativeSuppressionBatch()
   if U.PerfDisabled and U.PerfDisabled("sweep") then return end
   if SuppressLevel() <= 0 then return end
 
-  -- PLAYER_TARGET_CHANGED can precede the native level renderer's final write.
-  -- One deferred sweep was therefore early enough for the yellow number to
-  -- return. Clear just that FontString across a bounded 0.6s window (at the
-  -- normal 0.05s cadence), without Hide, event removal, or Show replacement.
+  -- PLAYER_TARGET_CHANGED can precede the native renderer's final write of
+  -- the level, portrait and bars. One deferred sweep is early enough for
+  -- those to return. Re-punch the short visual list across a bounded 0.6s
+  -- window (at the normal 0.05s cadence), without Hide, event removal, or
+  -- Show replacement.
   if targetLevelRetryPasses > 0 then
-    local levelText = ResolveNativeObject("TargetLevelText")
-    if levelText then
-      pcall(ZeroAlpha, levelText)
-      pcall(ClearTextVisual, levelText)
-    end
+    PunchTargetVisuals()
     targetLevelRetryPasses = targetLevelRetryPasses - 1
   end
 
@@ -860,10 +918,23 @@ function U.SuppressNativeFrame(names, group)
         -- also incrementing the same totals.
         local visited, torn = statVisited, statTornDown
         targetSweep()
+        PunchTargetVisuals()
         lastTargetVisited = statVisited - visited
         lastTargetTornDown = statTornDown - torn
       end)
     end)
+    -- Friendly (and grouped) targets keep writing the stock health/mana bars
+    -- on UNIT_HEALTH / UNIT_MANA. Those widgets ignore SetAlpha, so the
+    -- target-change sweep is not enough: punch the same short visual list on
+    -- the next driver tick, coalesced, whenever the target's vitals move.
+    local function TargetVitalsChanged(event, unit)
+      if unit ~= "target" then return end
+      U.DeferOnce("compat.target-visuals", PunchTargetVisuals)
+    end
+    U.RegisterEvent("UNIT_HEALTH", TargetVitalsChanged)
+    U.RegisterEvent("UNIT_MANA", TargetVitalsChanged)
+    U.RegisterEvent("UNIT_ENERGY", TargetVitalsChanged)
+    U.RegisterEvent("UNIT_RAGE", TargetVitalsChanged)
     -- Deferred and coalesced for the same reason the target sweep above is,
     -- and more urgently: PARTY_MEMBERS_CHANGED is by far the noisiest event
     -- this client emits while grouped. Measured in the reporter's runs, 130
