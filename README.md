@@ -37,6 +37,7 @@ both *installed* is harmless — but having both *enabled* is not.
 | `/qtp profile list\|save\|load\|delete <name>` | Layout profiles |
 | `/qtp meter show\|hide\|add\|close` | Damage meter windows |
 | `/qtp check` | Runtime self-check |
+| `/qtp frames <text>` | Find stock frames by name and see which are still shown |
 | `/qtp debug` | Toggle debug output |
 
 ## What was ported from QtUI
@@ -57,6 +58,19 @@ Cooldown text was *not* ported: the base already renders it on action buttons an
 auras, with colour tiers.
 
 ## Changed from the base
+
+**Combo points are no longer rogue-only.** A druid gets combo points in cat
+form, but the pips and the stock `ComboFrame` suppression were both gated on
+`ROGUE`, so a druid saw the native gems at `TargetFrame`'s stock top-left
+position instead. Rogues still see five slots at all times; a druid sees the
+strip only while holding points. Filled pips take the player's class colour.
+
+**Stock target health/mana bars.** The suppression list carried only the
+`$parent`-named `TargetFrameHealthBar` / `TargetFrameManaBar`. This client also
+exposes them as bare `Target*` names — the same rename that once left the yellow
+level number on screen — so both spellings are now listed. Use
+`/qtp frames Target` to see which names actually resolve here, and whether any
+of them is still SHOWN.
 
 **Stance bar is no longer warrior-only.** UnrealUI built `modules/stancebar.lua`
 only for warriors, leaving druids, rogues, priests and paladins with no bar at

@@ -8,7 +8,7 @@
 -- PORTED AS-IS, deliberately. Two things constrain edits to this file:
 --
 --  1. Top-level local budget. Lua 5.1 allows 200 local variables per chunk and
---     this file already declares 199 at the top level. Anything added here must
+--     this file sits at exactly 200 -- the cap, zero headroom. Anything added
 --     therefore be a field on an existing table, not a new `local` -- which is
 --     why the module registration at the very bottom hangs off QtP rather than
 --     binding `local U = QtUiPlus` the way every other QtUiPlus module does.
@@ -1257,8 +1257,7 @@ local function EnsureReportMenu()
       tile = true, tileSize = 8, edgeSize = 10,
       insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
-    if menu.SetBackdropColor then menu:SetBackdropColor(.04, .05, .06, .96) end
-    if menu.SetBackdropBorderColor then menu:SetBackdropBorderColor(.25, .34, .36, 1) end
+    QtP.PaintPanel(menu)
   end
   local channels = {
     { "SELF", "Self" },
@@ -1674,8 +1673,7 @@ local function EnsureSpellDetails()
       tile = true, tileSize = 8, edgeSize = 12,
       insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
-    if frame.SetBackdropColor then frame:SetBackdropColor(.02, .025, .03, .96) end
-    if frame.SetBackdropBorderColor then frame:SetBackdropBorderColor(.2, .7, .62, 1) end
+    QtP.PaintPanel(frame)
   end
   frame.title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   frame.title:SetJustifyH("LEFT")
@@ -1702,8 +1700,7 @@ local function EnsureSpellDetails()
       tile = true, tileSize = 8, edgeSize = 8,
       insets = { left = 1, right = 1, top = 1, bottom = 1 },
     })
-    if frame.compare.SetBackdropColor then frame.compare:SetBackdropColor(.08, .12, .14, .95) end
-    if frame.compare.SetBackdropBorderColor then frame.compare:SetBackdropBorderColor(.2, .7, .62, 1) end
+    QtP.PaintSurface(frame.compare)
   end
   frame.compare.text = frame.compare:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   frame.compare.text:SetPoint("CENTER", frame.compare, "CENTER", 0, 0)
@@ -1972,7 +1969,17 @@ local function SelectFight(index)
   MarkMetersDirty()
   local i
   for i = 1, table.getn(QtP.meterFrames or {}) do
-    RefreshMeter(QtP.meterFrames[i])
+    -- Not RefreshMeter(): that local is declared ~540 lines below this point,
+    -- so the bare name here would bind to the global of that name, which is
+    -- nil. Inherited from QtUI, where picking a fight from the list errors.
+    -- A `local RefreshMeter` forward declaration is the usual fix and is not
+    -- available here: this chunk sits at exactly 200 top-level locals, Lua
+    -- 5.1's hard cap, with zero headroom. The reference goes through QtP
+    -- instead, assigned at the definition site, which runs at load time --
+    -- long before any click can reach this line.
+    if QtP.RefreshMeterWindow then
+      QtP.RefreshMeterWindow(QtP.meterFrames[i])
+    end
   end
 end
 
@@ -1988,8 +1995,7 @@ local function EnsureFightPicker()
       tile = true, tileSize = 8, edgeSize = 12,
       insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
-    if frame.SetBackdropColor then frame:SetBackdropColor(.02, .025, .03, .96) end
-    if frame.SetBackdropBorderColor then frame:SetBackdropBorderColor(.2, .7, .62, 1) end
+    QtP.PaintPanel(frame)
   end
   frame.title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   frame.title:SetJustifyH("LEFT")
@@ -2014,17 +2020,16 @@ local function EnsureFightPicker()
         tile = true, tileSize = 8, edgeSize = 8,
         insets = { left = 1, right = 1, top = 1, bottom = 1 },
       })
-      if btn.SetBackdropColor then btn:SetBackdropColor(.05, .06, .07, .9) end
-      if btn.SetBackdropBorderColor then btn:SetBackdropBorderColor(.22, .28, .3, 1) end
+      QtP.PaintSurface(btn)
     end
     btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     btn.text:SetPoint("LEFT", btn, "LEFT", 8, 0)
     btn.text:SetJustifyH("LEFT")
     btn:SetScript("OnEnter", function()
-      if this.SetBackdropColor then this:SetBackdropColor(.08, .4, .64, .95) end
+      QtP.PaintHover(this)
     end)
     btn:SetScript("OnLeave", function()
-      if this.SetBackdropColor then this:SetBackdropColor(.05, .06, .07, .9) end
+      QtP.PaintSurface(this)
     end)
     btn:SetScript("OnClick", function()
       SelectFight(this.fightIndex)
@@ -2513,6 +2518,8 @@ local function PlaceBar(bar, frame, index, barH, visible, spacing)
   end
 end
 
+-- Published on QtP as RefreshMeterWindow just below, for SelectFight further
+-- up the file, which cannot see this local. Do not rename without updating it.
 local function RefreshMeter(frame)
   if not frame then return end
   local view = frame.view or "damage"
@@ -2935,8 +2942,7 @@ local function MakeMeterButton(parent, caption, lines, onClick, icon)
       tile = true, tileSize = 8, edgeSize = 8,
       insets = { left = 1, right = 1, top = 1, bottom = 1 },
     })
-    if btn.SetBackdropColor then btn:SetBackdropColor(.12, .12, .12, .9) end
-    if btn.SetBackdropBorderColor then btn:SetBackdropBorderColor(.35, .35, .35, 1) end
+    QtP.PaintSurface(btn)
   end
   if icon then
     btn.icon = btn:CreateTexture(nil, "ARTWORK")
@@ -3023,11 +3029,9 @@ local function ApplyMeterWindow(frame)
   end
   if frame.SetBackdropColor then
     if showBg then
-      frame:SetBackdropColor(.025, .035, .045, .92)
-      if frame.SetBackdropBorderColor then frame:SetBackdropBorderColor(.18, .24, .28, 1) end
+      QtP.PaintPanel(frame)
     else
-      frame:SetBackdropColor(0, 0, 0, 0)
-      if frame.SetBackdropBorderColor then frame:SetBackdropBorderColor(0, 0, 0, 0) end
+      QtP.PaintClear(frame)
     end
   end
   LayoutMeterChrome(frame, width, height)
@@ -3043,10 +3047,20 @@ end
 local function PlaceMeterWindow(frame)
   if not frame then return end
   local key = MeterMoveKey(frame.meterId)
-  if QtPDB.positions and QtPDB.positions[key] then
-    local pos = QtPDB.positions[key]
-    frame:ClearAllPoints()
-    frame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", pos.x or 20, pos.y or 220)
+
+  -- Read the position from the QtUiPlus mover store, not QtPDB.positions --
+  -- that was QtUI MoveMode's own store and nothing writes it here, so the
+  -- lookup always missed and fell through to the default anchor below. Since
+  -- ShowMeterWindow calls this on every show, that recomputed default is what
+  -- snapped a window the player had dragged back into the corner.
+  --
+  -- Reapplying the stored point, rather than returning early, keeps this
+  -- idempotent whether it is reached from window creation or from a show.
+  -- Fully qualified: this file is at Lua 5.1's 200 top-level local cap and
+  -- cannot afford a `local U`.
+  local stored = QtUiPlus.GetPosition(key)
+  if stored then
+    QtUiPlus.ApplyFramePoint(frame, stored)
     return
   end
   local index = 1
@@ -3073,6 +3087,8 @@ local function HideMeterWindow(frame)
   if frame.EnableMouse then frame:EnableMouse(false) end
   if frame.Hide then pcall(frame.Hide, frame) end
 end
+
+QtP.RefreshMeterWindow = RefreshMeter
 
 local function RefreshMeterCanClose()
   local frames = QtP.meterFrames
@@ -3143,8 +3159,7 @@ local function EnsureModePicker()
       tile = true, tileSize = 8, edgeSize = 12,
       insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
-    if frame.SetBackdropColor then frame:SetBackdropColor(.02, .025, .03, .96) end
-    if frame.SetBackdropBorderColor then frame:SetBackdropBorderColor(.2, .7, .62, 1) end
+    QtP.PaintPanel(frame)
   end
   frame.title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   frame.title:SetJustifyH("LEFT")
@@ -3169,18 +3184,17 @@ local function EnsureModePicker()
         tile = true, tileSize = 8, edgeSize = 8,
         insets = { left = 1, right = 1, top = 1, bottom = 1 },
       })
-      if btn.SetBackdropColor then btn:SetBackdropColor(.05, .06, .07, .9) end
-      if btn.SetBackdropBorderColor then btn:SetBackdropBorderColor(.22, .28, .3, 1) end
+      QtP.PaintSurface(btn)
     end
     btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     btn.text:SetPoint("LEFT", btn, "LEFT", 8, 0)
     btn.text:SetJustifyH("LEFT")
     btn.modeIndex = i
     btn:SetScript("OnEnter", function()
-      if this.SetBackdropColor then this:SetBackdropColor(.08, .4, .64, .95) end
+      QtP.PaintHover(this)
     end)
     btn:SetScript("OnLeave", function()
-      if this.SetBackdropColor then this:SetBackdropColor(.05, .06, .07, .9) end
+      QtP.PaintSurface(this)
     end)
     btn:SetScript("OnClick", function()
       local source = modeSource
@@ -3480,8 +3494,7 @@ function QtP:SetupDamageMeter()
       tile = true, tileSize = 8, edgeSize = 12,
       insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
-    d:SetBackdropColor(.015, .018, .022, .98)
-    d:SetBackdropBorderColor(.4, .52, .54, 1)
+    QtP.PaintPanel(d)
     d:EnableMouse(true)
     d.title = d:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     d.title:SetPoint("TOPLEFT", d, "TOPLEFT", 14, -12)
@@ -3500,7 +3513,7 @@ function QtP:SetupDamageMeter()
       tile = true, tileSize = 8, edgeSize = 8,
       insets = { left = 1, right = 1, top = 1, bottom = 1 },
     })
-    yes:SetBackdropColor(.08, .4, .64, .95)
+    QtP.PaintHover(yes)
     yes.text = yes:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     yes.text:SetPoint("CENTER", yes, "CENTER", 0, 0)
     yes.text:SetText("Reset")
@@ -3523,7 +3536,7 @@ function QtP:SetupDamageMeter()
       tile = true, tileSize = 8, edgeSize = 8,
       insets = { left = 1, right = 1, top = 1, bottom = 1 },
     })
-    no:SetBackdropColor(.04, .05, .06, .95)
+    QtP.PaintSurface(no)
     no.text = no:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     no.text:SetPoint("CENTER", no, "CENTER", 0, 0)
     no.text:SetText("Keep")

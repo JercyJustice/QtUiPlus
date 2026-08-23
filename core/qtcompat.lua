@@ -19,6 +19,7 @@
 -- same native frames, would have the two addons silently overwrite each other.
 
 local U = QtUiPlus
+local M = U.media
 
 QtP = {}
 QtPDB = nil   -- resolved against QtUiPlusDB.qt once SavedVariables have loaded
@@ -50,8 +51,12 @@ function QtP:Print(message)
   U.Print(message)
 end
 
+-- Adapted to the QtUiPlus look: QtUI filled its meter bars with the raised,
+-- glossy native UI-StatusBar art. Every bar this addon draws uses the flat
+-- plain texture instead, so a ported window reads as part of the same UI
+-- rather than as a transplant from another one.
 QtP.media = {
-  statusbar = "Interface\\TargetingFrame\\UI-StatusBar",
+  statusbar = M.texture.plain,
 }
 
 -- ---------------------------------------------------------------------------
@@ -152,21 +157,93 @@ function QtP:PlaceAlignedText(fontString, parent, align, pad, width, height, ox,
   end
 end
 
+-- Every window the ported modules build goes through here, so this is the one
+-- place that decides whether they look like QtUiPlus or like QtUI.
+--
+-- The QtUI original painted a dark blue-grey fill with the native
+-- UI-Tooltip-Border edge art. That is not this addon's panel: core/style.lua
+-- uses a near-black fill with a single thin outline and no stock edge art, and
+-- deliberately clears the native edge, because SetBackdrop leaves it drawing on
+-- top. Routing through U.CreateBackdrop gets that treatment, and any future
+-- change to the panel style reaches the ported windows for free.
+--
+-- U.CreateBackdrop lives in core/style.lua, which loads AFTER this file. That
+-- is fine: this runs when a window is built, long after every file has loaded.
 function QtP:CreatePanel(name, parent, level)
   local panel = CreateFrame("Frame", name, parent or UIParent)
   panel:SetFrameStrata("BACKGROUND")
   panel:SetFrameLevel(level or 1)
-  panel:SetBackdrop({
-    bgFile = "Interface\\Buttons\\WHITE8X8",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true,
-    tileSize = 8,
-    edgeSize = 12,
-    insets = { left = 2, right = 2, top = 2, bottom = 2 },
-  })
-  panel:SetBackdropColor(.025, .035, .045, .92)
-  panel:SetBackdropBorderColor(.18, .24, .28, 1)
+
+  if type(U.CreateBackdrop) == "function" then
+    U.CreateBackdrop(panel)
+  elseif panel.SetBackdrop then
+    -- Only reachable if core/style.lua failed to load; an opaque panel still
+    -- beats a transparent one.
+    pcall(panel.SetBackdrop, panel, { bgFile = M.texture.plain })
+    pcall(panel.SetBackdropColor, panel, M.Unpack(M.color.background))
+    pcall(panel.SetBackdropBorderColor, panel, 0, 0, 0, 0)
+  end
+
   return panel
+end
+
+-- ---------------------------------------------------------------------------
+-- Panel painting
+--
+-- The ported windows paint their own chrome inline, in a dozen places, with
+-- QtUI's blue-grey literals. These helpers put the QtUiPlus palette behind
+-- those call sites so the colours live in core/media.lua like every other
+-- surface, instead of being duplicated as numbers across a 3500-line file.
+--
+-- Colour arguments are not accepted on purpose: the point is that a ported
+-- window cannot invent a shade that the rest of the UI does not use.
+-- ---------------------------------------------------------------------------
+local function Paint(frame, fill, edge)
+  if not frame or not frame.SetBackdropColor then return end
+  pcall(frame.SetBackdropColor, frame, M.Unpack(fill))
+  if frame.SetBackdropBorderColor then
+    pcall(frame.SetBackdropBorderColor, frame, M.Unpack(edge))
+  end
+end
+
+-- The base panel: meter windows, menus and popups.
+function QtP.PaintPanel(frame)
+  Paint(frame, M.color.background, M.color.border)
+end
+
+-- A row or button sitting on top of a panel. Same family, lifted just enough
+-- to separate from the panel behind it.
+function QtP.PaintSurface(frame)
+  Paint(frame, M.color.backgroundRaised, M.color.border)
+end
+
+-- A hovered or selected row. QtUI used a saturated blue here, which is the one
+-- colour that reads as "not this addon" next to the QtUiPlus accent.
+function QtP.PaintHover(frame)
+  Paint(frame, M.color.accentFill, M.color.accent)
+end
+
+-- Fully transparent, for the "hide meter background" option.
+function QtP.PaintClear(frame)
+  if not frame or not frame.SetBackdropColor then return end
+  pcall(frame.SetBackdropColor, frame, 0, 0, 0, 0)
+  if frame.SetBackdropBorderColor then
+    pcall(frame.SetBackdropBorderColor, frame, 0, 0, 0, 0)
+  end
+end
+
+-- QtUI's MoveMode called QtUI:RegisterMovable to enrol a window in edit mode.
+-- QtUiPlus has its own mover system, so the ported call is bridged here rather
+-- than porting MoveMode.lua alongside a mover that already does the job.
+-- Without this the ported windows are simply not draggable: the call sites
+-- guard with `if self.RegisterMovable then`, so a missing bridge fails silently
+-- and the damage meter just sits where it was put.
+function QtP:RegisterMovable(id, label, frame, default)
+  if type(id) ~= "string" or not frame then return end
+  -- Rebind first: a meter window that was closed and re-added reuses its id
+  -- with a new frame object, and RegisterMover rejects a duplicate id.
+  if U.RebindMover(id, frame) then return end
+  U.RegisterMover(id, frame, { label = label or id, default = default })
 end
 
 -- ---------------------------------------------------------------------------

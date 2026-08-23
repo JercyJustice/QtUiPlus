@@ -103,6 +103,7 @@ local function ShowHelp()
   U.Print("  |cffffff00/qtp nosuppress|r - skip native frame suppression (needs /reload)")
   U.Print("  |cffffff00/qtp suppress <0-4>|r - bisect the suppression recipe (needs /reload)")
   U.Print("  |cffffff00/qtp debug|r - toggle debug output")
+  U.Print("  |cffffff00/qtp frames <text>|r - find stock frames whose name contains <text>")
   U.Print("  |cffffff00/qtp profile|r - list, save, load or delete a layout profile")
   U.Print("  |cffffff00/qtp meter|r - show, hide, add or close a damage meter window")
 end
@@ -1286,6 +1287,106 @@ handlers["debug"] = function()
   end
   U.db.debug = not U.db.debug
   U.Print("debug output " .. (U.db.debug and "|cff55ff55on|r" or "|cffff5555off|r"))
+end
+
+-- ---------------------------------------------------------------------------
+-- Stock frame finder.
+--
+-- Exists because guessing a stock frame's global name is the single most
+-- common way suppression silently does nothing here: U.SuppressNativeFrame
+-- skips a name that does not resolve, so a wrong guess looks exactly like a
+-- working fix until the frame shows up in a screenshot. This client has
+-- already been caught renaming TargetFrameName -> TargetName and friends.
+--
+-- Enumeration is not assumed. This client has no EnumerateFrames, and core/
+-- init.lua treats _G as optional, so the pattern is matched against _G only
+-- when _G is really a table; otherwise a candidate list is probed by name,
+-- which needs nothing but getglobal.
+-- ---------------------------------------------------------------------------
+local FRAME_NAME_CANDIDATES = {
+  "PlayerFrame", "PlayerFrameHealthBar", "PlayerFrameManaBar", "PlayerPortrait",
+  "PlayerName", "PlayerLevelText", "PlayerHealthBar", "PlayerManaBar",
+  "TargetFrame", "TargetFrameHealthBar", "TargetFrameManaBar",
+  "TargetFrameHealthBarText", "TargetFrameManaBarText", "TargetFrameBackground",
+  "TargetFrameNameBackground", "TargetFrameTextureFrame",
+  "TargetName", "TargetLevelText", "TargetPortrait", "TargetHighLevelTexture",
+  "TargetHealthBar", "TargetManaBar", "TargetHealthBarText",
+  "TargetManaBarText", "TargetDeadText",
+  "ComboFrame", "ComboPoint1", "ComboPoint2", "ComboPoint3", "ComboPoint4",
+  "ComboPoint5",
+  "PetFrame", "PetFrameHealthBar", "PetFrameManaBar",
+  "TargetofTargetFrame", "TargetofTargetHealthBar", "TargetofTargetManaBar",
+  "ShapeshiftBarFrame", "PetActionBarFrame", "MainMenuBar",
+}
+
+local FRAME_REPORT_LIMIT = 40
+
+local function DescribeFrame(name, object)
+  local kind = type(object)
+  local state = ""
+  if kind == "table" and object.IsVisible then
+    local ok, visible = pcall(object.IsVisible, object)
+    if ok then
+      if visible then
+        state = " |cffff5555SHOWN|r"
+      else
+        state = " |cff55ff55hidden|r"
+      end
+    end
+  end
+  return "  |cffffff00" .. name .. "|r (" .. kind .. ")" .. state
+end
+
+handlers["frames"] = function(rest)
+  local needle = Trim(rest or "")
+  if needle == "" then
+    U.Print("usage: |cffffff00/qtp frames <text>|r  e.g. |cffffff00/qtp frames Target|r")
+    return
+  end
+  local lowered = string.lower(needle)
+
+  local shown, scanned = 0, 0
+  local globals = U.G("_G")
+
+  if type(globals) == "table" then
+    U.Print("stock frames matching \"" .. needle .. "\" (enumerated):")
+    local name, object
+    for name, object in pairs(globals) do
+      if type(name) == "string" and string.find(string.lower(name), lowered, 1, true) then
+        scanned = scanned + 1
+        if shown < FRAME_REPORT_LIMIT then
+          shown = shown + 1
+          U.Print(DescribeFrame(name, object))
+        end
+      end
+    end
+  else
+    -- No enumeration on this client: probe the candidates by name instead, so
+    -- the answer is still real rather than absent.
+    U.Print("stock frames matching \"" .. needle .. "\" (probed, no _G here):")
+    local i
+    for i = 1, table.getn(FRAME_NAME_CANDIDATES) do
+      local name = FRAME_NAME_CANDIDATES[i]
+      if string.find(string.lower(name), lowered, 1, true) then
+        local object = U.G(name)
+        if object ~= nil then
+          scanned = scanned + 1
+          if shown < FRAME_REPORT_LIMIT then
+            shown = shown + 1
+            U.Print(DescribeFrame(name, object))
+          end
+        end
+      end
+    end
+  end
+
+  if scanned == 0 then
+    U.Print("  |cffff5555no match|r - the name this client uses is something else")
+  elseif scanned > shown then
+    U.Print("  ... " .. (scanned - shown) .. " more not listed")
+  end
+  U.Print("  |cffff5555SHOWN|r on a frame QtUiPlus should be hiding means the " ..
+          "suppression list has the wrong name for it.")
 end
 
 -- ---------------------------------------------------------------------------

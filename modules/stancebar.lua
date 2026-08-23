@@ -43,9 +43,45 @@ local M = U.media
 local SB = U.RegisterModule("stancebar")
 
 local ICON_INSET = 2
-local SIZE = 30
-local SPACING = 3
 local MAX_SLOTS = 10 -- native ShapeshiftButton1-10; a warrior only ever fills 3
+
+-- Same shape as modules/petbar.lua: limits clamp whatever comes back from the
+-- saved file, defaults seed it on first use. The former SIZE = 30 and
+-- SPACING = 3 constants are now the size/spacing defaults.
+local LIMITS = {
+  perRow  = { min = 1,  max = MAX_SLOTS, step = 1 },
+  size    = { min = 15, max = 60, step = 1 },
+  spacing = { min = -3, max = 20, step = 1 },
+}
+
+local DEFAULTS = {
+  enabled = true,
+  perRow  = MAX_SLOTS,
+  size    = 30,
+  spacing = 3,
+}
+
+local cfg
+
+local function Clamp(name, value)
+  local limit = LIMITS[name]
+  value = tonumber(value)
+  if not limit then return value end
+  if not value then return limit.min end
+  value = U.Round(value)
+  if value < limit.min then value = limit.min end
+  if value > limit.max then value = limit.max end
+  return value
+end
+
+local function Number(name)
+  if not cfg then return LIMITS[name] and LIMITS[name].min or 0 end
+  return Clamp(name, cfg[name])
+end
+
+local function IsEnabled()
+  return cfg and cfg.enabled and true or false
+end
 
 local COLOR = {
   cooldown = { 1.00, 0.20, 0.20, 1.00 },
@@ -177,8 +213,8 @@ local function CreateButton(index)
     HideTooltip()
   end)
 
-  button:SetWidth(SIZE)
-  button:SetHeight(SIZE)
+  button:SetWidth(Number("size"))
+  button:SetHeight(Number("size"))
   icon:ClearAllPoints()
   icon:SetPoint("TOPLEFT", button, "TOPLEFT", ICON_INSET, -ICON_INSET)
   icon:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -ICON_INSET, ICON_INSET)
@@ -267,7 +303,7 @@ local function CreateBar()
   -- interface windows.
   pcall(frame.SetFrameStrata, frame, "LOW")
   frame:SetWidth(100)
-  frame:SetHeight(SIZE)
+  frame:SetHeight(Number("size"))
 
   local i
   for i = 1, MAX_SLOTS do buttons[i] = CreateButton(i) end
@@ -288,19 +324,37 @@ local function Layout()
   -- unlocked-placeholder rule modules/petbar.lua and modules/castbar.lua use.
   -- Gated on everHadForms so a class with no stance bar is not offered an
   -- empty placeholder every time edit mode opens.
-  local visible = slotCount > 0 or (U.IsUnlocked() and everHadForms)
+  local visible = IsEnabled() and (slotCount > 0 or (U.IsUnlocked() and everHadForms))
   local count = slotCount > 0 and slotCount or 3
   if count > MAX_SLOTS then count = MAX_SLOTS end
 
-  frame:SetWidth(count * SIZE + (count - 1) * SPACING)
-  frame:SetHeight(SIZE)
+  local size = Number("size")
+  local spacing = Number("spacing")
+
+  -- Never wider than there are buttons to put in it, or the frame (and the
+  -- mover handle that tracks it) would reserve empty columns.
+  local perRow = Number("perRow")
+  if perRow > count then perRow = count end
+  if perRow < 1 then perRow = 1 end
+  local rows = math.ceil(count / perRow)
+
+  frame:SetWidth(perRow * size + (perRow - 1) * spacing)
+  frame:SetHeight(rows * size + (rows - 1) * spacing)
 
   local i
   for i = 1, MAX_SLOTS do
     local button = buttons[i]
     if visible and i <= count then
+      -- Size is re-applied on every layout pass, not just at creation, so a
+      -- slider drag is reflected by the next 0.5s sweep instead of needing a
+      -- reload.
+      button:SetWidth(size)
+      button:SetHeight(size)
+      local column = math.mod(i - 1, perRow)
+      local row = math.floor((i - 1) / perRow)
       button:ClearAllPoints()
-      button:SetPoint("TOPLEFT", frame, "TOPLEFT", (i - 1) * (SIZE + SPACING), 0)
+      button:SetPoint("TOPLEFT", frame, "TOPLEFT",
+                      column * (size + spacing), -row * (size + spacing))
       button:Show()
       FullUpdate(button)
     else
@@ -347,6 +401,107 @@ local function SuppressNativeBar()
 end
 
 -- ---------------------------------------------------------------------------
+-- Settings API
+--
+-- Mirrors modules/petbar.lua: this module owns the state, clamps every write
+-- and re-applies immediately, so the settings page holds no state of its own.
+-- ---------------------------------------------------------------------------
+function U.StanceBarLimits(name)
+  local limit = LIMITS[name]
+  if not limit then return nil end
+  return limit.min, limit.max, limit.step
+end
+
+function U.GetStanceBarSetting(name)
+  if not cfg then return nil end
+  if name == "enabled" then return cfg.enabled and true or false end
+  return Number(name)
+end
+
+function U.SetStanceBarSetting(name, value)
+  if not cfg then return nil end
+  if name == "enabled" then
+    cfg.enabled = value and true or false
+  else
+    if not LIMITS[name] then return nil end
+    cfg[name] = Clamp(name, value)
+  end
+  Apply()
+  return U.GetStanceBarSetting(name)
+end
+
+-- ---------------------------------------------------------------------------
+-- Settings page
+-- ---------------------------------------------------------------------------
+local PAGE_WIDTH = 484
+local SLIDERS = {
+  { key = "perRow",  text = "Buttons Per Row" },
+  { key = "size",    text = "Button Size" },
+  { key = "spacing", text = "Button Spacing" },
+}
+
+local function BuildSettingsPage(parent)
+  local widgets, controls = {}, {}
+
+  local header = U.CreateSectionHeader(parent, {
+    text = "Stance Bar", width = PAGE_WIDTH, y = -4,
+  })
+  table.insert(widgets, header)
+
+  local enable = U.CreateCheckbox(parent, {
+    name = "QtUiPlusStanceBarConfigEnable",
+    text = "Enable",
+    value = U.GetStanceBarSetting("enabled"),
+    onChange = function(value) U.SetStanceBarSetting("enabled", value) end,
+  })
+  enable.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -34)
+  table.insert(widgets, enable)
+
+  local i
+  for i = 1, table.getn(SLIDERS) do
+    local spec = SLIDERS[i]
+    local minimum, maximum, step = U.StanceBarLimits(spec.key)
+
+    local slider = U.CreateSlider(parent, {
+      name = "QtUiPlusStanceBarConfig" .. spec.key,
+      text = spec.text,
+      width = 200,
+      min = minimum, max = maximum, step = step,
+      value = U.GetStanceBarSetting(spec.key),
+      onChange = function(value) U.SetStanceBarSetting(spec.key, value) end,
+    })
+    slider.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -78 - (i - 1) * 44)
+
+    controls[spec.key] = slider
+    table.insert(widgets, slider)
+  end
+
+  local hint = U.CreateSettingsLabel(parent, {
+    size = M.fontSize.small, color = M.color.textDim,
+    inherits = "GameFontNormalSmall", justify = "LEFT",
+  })
+  if hint then
+    local finalSlider = controls[SLIDERS[table.getn(SLIDERS)].key]
+    U.AnchorSettingsDescription(hint, finalSlider.box,
+                                -math.floor((finalSlider.width - finalSlider.boxWidth) / 2))
+    hint:SetText("Warrior stances, druid forms, rogue Stealth, priest Shadowform " ..
+                 "and paladin auras. Hidden for classes with no forms.")
+    table.insert(widgets, hint)
+  end
+
+  local function Refresh()
+    enable.SetValue(U.GetStanceBarSetting("enabled"))
+    local j
+    for j = 1, table.getn(SLIDERS) do
+      local key = SLIDERS[j].key
+      if controls[key] then controls[key].SetValue(U.GetStanceBarSetting(key)) end
+    end
+  end
+
+  return widgets, Refresh
+end
+
+-- ---------------------------------------------------------------------------
 -- Events and refresh
 -- ---------------------------------------------------------------------------
 local function RegisterEvents()
@@ -356,7 +511,20 @@ local function RegisterEvents()
   U.RegisterEvent("PLAYER_AURAS_CHANGED", function() ForEachButton(UpdateSlot) end)
 end
 
+function SB:OnInit()
+  cfg = U.ModuleConfig("stancebar", DEFAULTS)
+
+  if type(U.RegisterSettingsTab) == "function" then
+    U.RegisterSettingsTab("stancebar", "Stance Bar", BuildSettingsPage, {
+      parent = "actionbars",
+      after = "petbar",
+    })
+  end
+end
+
 function SB:OnEnable()
+  if not cfg then cfg = U.ModuleConfig("stancebar", DEFAULTS) end
+
   -- Suppression is unconditional: ShapeshiftBarFrame and its buttons exist for
   -- every class, and hiding a bar a class never populates costs nothing, while
   -- skipping it for a druid would leave the native bar drawn over this one.
@@ -375,9 +543,13 @@ end
 -- Reported by /qtp check.
 function U.StanceBarReport()
   return {
+    enabled = IsEnabled(),
     everHadForms = everHadForms,
     created = frame and true or false,
     shown = shown,
     slotCount = slotCount,
+    perRow = Number("perRow"),
+    size = Number("size"),
+    spacing = Number("spacing"),
   }
 end

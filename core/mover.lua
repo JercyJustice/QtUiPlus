@@ -458,6 +458,25 @@ end
 -- frame    the frame the user drags
 -- options  { label = "Player", default = { point, relativePoint, x, y },
 --            visible = function() return true end }
+-- Re-points an existing mover at a different frame.
+--
+-- A window that can be closed and re-opened reuses its id (the damage meter
+-- does exactly this), but the frame behind that id is a new object each time.
+-- Without a rebind, RegisterMover rejects the duplicate id and the mover keeps
+-- driving a frame the player can no longer see, so the new window is
+-- unmovable. Returns false for an id that was never registered, so callers can
+-- use it as a "rebind or register" test.
+function U.RebindMover(id, frame)
+  if type(id) ~= "string" or not frame then return false end
+  local entry = movers[id]
+  if not entry then return false end
+
+  entry.frame = frame
+  pcall(frame.SetMovable, frame, true)
+  ApplyStoredPosition(entry)
+  return true
+end
+
 function U.RegisterMover(id, frame, options)
   if type(id) ~= "string" or not frame then
     U.Error("RegisterMover requires an id and a frame")

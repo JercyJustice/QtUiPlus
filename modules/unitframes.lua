@@ -241,8 +241,18 @@ local function SuppressStockFrames()
   -- TargetHighLevelTexture is the skull this client draws in place of the
   -- number for a ??-level target, so it belongs with the level rather than
   -- being a separate feature.
+  -- Same naming trap as the three names above, and the cause of the stock
+  -- target health and mana bars still drawing at TargetFrame's top-left
+  -- position: the $parent-named TargetFrameHealthBar / TargetFrameManaBar in
+  -- the list above are what UnrealPfUI suppresses, but this client also
+  -- exposes the bars under bare Target* names. A name that does not resolve is
+  -- skipped on every pass and costs nothing, so both spellings are listed
+  -- rather than betting on one.
   U.SuppressNativeFrame({ "TargetName", "TargetLevelText",
-                          "TargetHighLevelTexture", "TargetPortrait" },
+                          "TargetHighLevelTexture", "TargetPortrait",
+                          "TargetHealthBar", "TargetHealthBarText",
+                          "TargetManaBar", "TargetManaBarText",
+                          "TargetFrameBackground", "TargetDeadText" },
                         "target")
 
   U.SuppressNativeFrame(U.NativeFrameParts("TargetofTarget",
@@ -1062,6 +1072,11 @@ local COMBO_HEIGHT = 4
 local COMBO_EMPTY = { 0.24, 0.24, 0.24, 1.00 }
 
 local comboPips = nil
+-- Rogues always see the five slots; a druid only has combo points in cat form,
+-- so an always-visible empty strip would be noise on their bar for most of the
+-- session. The pips sit on a raised child layer, so showing and hiding them
+-- shifts no layout.
+local comboAlwaysShown = false
 
 -- The stock combo display is its own global family, not a TargetFrame child
 -- name, so the suppression list above never touched it: ComboFrame plus
@@ -1124,12 +1139,23 @@ local function SetComboPoints(count)
   if not comboPips then return end
   count = tonumber(count) or 0
 
+  -- Colour the filled pips with the player's own class colour rather than a
+  -- hardcoded rogue one: a druid's points should read as druid.
+  local fill = M.ClassColor(UnitClassToken("player")) or M.class.ROGUE
+  local shown = comboAlwaysShown or count > 0
+
   local i
   for i = 1, COMBO_MAX do
-    if i <= count then
-      U.SetBackgroundColor(comboPips[i], M.Unpack(M.class.ROGUE))
+    local pip = comboPips[i]
+    if not shown then
+      pip:Hide()
     else
-      U.SetBackgroundColor(comboPips[i], M.Unpack(COMBO_EMPTY))
+      pip:Show()
+      if i <= count then
+        U.SetBackgroundColor(pip, M.Unpack(fill))
+      else
+        U.SetBackgroundColor(pip, M.Unpack(COMBO_EMPTY))
+      end
     end
   end
 end
@@ -2198,7 +2224,13 @@ function UF:OnEnable()
 
   RegisterEvents()
 
-  if frames.player and UnitClassToken("player") == "ROGUE" then
+  -- Druids get combo points in cat form and were previously left out: the
+  -- stock ComboFrame was never suppressed for them and QtUiPlus drew no pips,
+  -- so a druid saw the native gems at TargetFrame's stock top-left position
+  -- while every other part of that frame was hidden.
+  local comboClass = UnitClassToken("player")
+  if frames.player and (comboClass == "ROGUE" or comboClass == "DRUID") then
+    comboAlwaysShown = (comboClass == "ROGUE")
     SuppressStockComboFrame()
     BuildComboPoints(frames.player)
     RegisterComboEvents()

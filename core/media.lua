@@ -66,6 +66,10 @@ M.texture = {
 -- state.
 M.color = {
   background = { 0.06, 0.06, 0.06, 0.85 },
+  -- One step up from `background`, for a row or button sitting on top of a
+  -- panel. Same neutral family; only the lift separates it from the surface
+  -- behind it.
+  backgroundRaised = { 0.10, 0.10, 0.10, 0.90 },
   border     = { 0.16, 0.16, 0.16, 1.00 },
   shadow     = { 0.00, 0.00, 0.00, 0.55 },
 
