@@ -139,7 +139,27 @@ local function BuildPage(parent)
     text = "Compact status strip",
     description = "Hides the FPS / MS / Durability / Bags captions and keeps " ..
                   "only the values, for a shorter strip.",
+    apply = function()
+      if type(U.ApplyStatusOverlay) == "function" then U.ApplyStatusOverlay() end
+    end,
   })
+
+  local fontSlider = U.CreateSlider(parent, {
+    name = "QtUiPlusQtSettingsStatusFont",
+    text = "Status overlay font",
+    width = 200,
+    min = 8, max = 18, step = 1,
+    value = type(U.GetStatusOverlayFontSize) == "function"
+            and U.GetStatusOverlayFontSize() or 11,
+    onChange = function(value)
+      if type(U.SetStatusOverlayFontSize) == "function" then
+        U.SetStatusOverlayFontSize(value)
+      end
+    end,
+  })
+  fontSlider.SetPoint("TOPLEFT", parent, "TOPLEFT", 258,
+                      ROW_START - 6 * ROW_STEP)
+  table.insert(widgets, fontSlider)
 
   -- Not a layout key: this one reads and writes a client CVar, so it gets its
   -- own checkbox rather than going through LayoutToggle.
@@ -222,6 +242,9 @@ local function BuildPage(parent)
     end
     boxes.damageMeter.SetValue(U.ModuleConfig("damagemeter", { enabled = true }).enabled)
     unshift.SetValue(GetUnshift())
+    if type(U.GetStatusOverlayFontSize) == "function" then
+      fontSlider.SetValue(U.GetStatusOverlayFontSize())
+    end
   end
 
   return widgets, Refresh
