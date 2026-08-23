@@ -5,8 +5,10 @@
 -- settings page that filters what they show.
 --
 -- Scope: player and target only. Party/raid auras, weapon enchants, and
--- pfUI's whole buff/debuff module framework are not reproduced here. The
--- player row stays debuffs-only; buffs were requested for the target.
+-- pfUI's whole buff/debuff module framework are not reproduced here.
+-- Four independent rows (player/target buffs and debuffs), each with its
+-- own edit-mode mover, matching QtUI's playerBuffs/playerDebuffs/
+-- targetBuffs/targetDebuffs handles.
 -- Hovering an icon shows the shared client GameTooltip (SetUnitBuff /
 -- SetUnitDebuff), the same native widget xpbar.lua already owns for the rest
 -- tooltip -- not a second private tooltip frame.
@@ -107,6 +109,7 @@ local CONFIG = "auras"
 
 local defaults = {
   playerEnabled     = true,
+  playerBuffEnabled = true,
   targetEnabled     = true,
   targetBuffEnabled = true,
   showTimers        = true,
@@ -850,8 +853,24 @@ local function RefreshRow(row, offset)
   if U.PerfDisabled and U.PerfDisabled("auras") then return 0 end
 
   local i
-  if not RowEnabled(row) or not UnitExists(row.unit) then
+  if not RowEnabled(row) then
     for i = 1, table.getn(row.icons) do HideIcon(row.icons[i]) end
+    row:Hide()
+    return 0
+  end
+
+  -- Empty shell in edit mode so the mover handle stays grabable with no unit
+  -- and no auras (same idea as unitframes.lua's unlocked target-of-target).
+  if not UnitExists(row.unit) then
+    for i = 1, table.getn(row.icons) do HideIcon(row.icons[i]) end
+    if U.IsUnlocked and U.IsUnlocked() then
+      local size = U.GetAuraSetting("size")
+      local spacing = U.GetAuraSetting("spacing")
+      row:SetWidth(size * 4 + spacing * 3)
+      row:SetHeight(size)
+      row:Show()
+      return size
+    end
     row:Hide()
     return 0
   end
@@ -863,7 +882,8 @@ local function RefreshRow(row, offset)
   local below = U.GetAuraSetting("belowFrame")
   local timers = U.GetAuraSetting("showTimers")
 
-  PositionRow(row, below, offset)
+  -- Independent movers own placement. Do not re-anchor to the unit frame
+  -- every tick -- that would fight core/mover.lua's stored position.
 
   local store = UnitStore(row.unit)
   local bucket = store and (row.harmful and store.harmful or store.helpful)
@@ -934,6 +954,13 @@ local function RefreshRow(row, offset)
     return height
   end
 
+  if U.IsUnlocked and U.IsUnlocked() then
+    row:SetWidth(size * 4 + spacing * 3)
+    row:SetHeight(size)
+    row:Show()
+    return size
+  end
+
   row:Hide()
   return 0
 end
@@ -941,12 +968,17 @@ end
 -- Debuffs take the frame edge and buffs stack outside them, so the row a player
 -- reads mid-fight never moves because a buff came or went.
 local function RefreshTarget()
-  local used = RefreshRow(rows.target, 0)
-  RefreshRow(rows.targetBuff, used > 0 and used + ROW_GAP or 0)
+  RefreshRow(rows.target, 0)
+  RefreshRow(rows.targetBuff, 0)
+end
+
+local function RefreshPlayer()
+  RefreshRow(rows.player, 0)
+  RefreshRow(rows.playerBuff, 0)
 end
 
 local function RefreshAll()
-  RefreshRow(rows.player, 0)
+  RefreshPlayer()
   RefreshTarget()
 end
 
@@ -955,7 +987,7 @@ local function RefreshUnitToken(token)
   if token == "target" then
     RefreshTarget()
   elseif token == "player" then
-    RefreshRow(rows.player, 0)
+    RefreshPlayer()
   else
     RefreshAll()
   end
@@ -1057,21 +1089,16 @@ end
 -- ---------------------------------------------------------------------------
 -- Build
 -- ---------------------------------------------------------------------------
-local function BuildRow(id, unit, harmful, setting)
-  local anchor = U.GetUnitFrame(unit)
-  if not anchor then
-    U.Debug("no unit frame to anchor auras to: " .. id)
-    return nil
-  end
+local function BuildRow(id, unit, harmful, setting, mover)
+  local size = U.GetAuraSetting("size")
+  local spacing = U.GetAuraSetting("spacing")
 
-  -- A plain Frame, not a Button: nothing here takes mouse input, and the row
-  -- rides the unit frame's mover rather than owning one of its own, so the
-  -- icons cannot drift away from the frame they describe.
-  local row = CreateFrame("Frame", "QtUiPlusAuraRow" .. id, anchor)
-  row.anchor = anchor
-  row:SetWidth(1)
-  row:SetHeight(1)
-  PositionRow(row, U.GetAuraSetting("belowFrame"), 0)
+  -- Parent UIParent, not the unit frame: each row is a QtUI-style independent
+  -- mover (playerBuffs / playerDebuffs / targetBuffs / targetDebuffs).
+  local row = CreateFrame("Frame", "QtUiPlusAuraRow" .. id, UIParent)
+  row:SetWidth(size * 4 + spacing * 3)
+  row:SetHeight(size)
+  pcall(row.SetFrameStrata, row, "MEDIUM")
 
   row.id = id
   row.unit = unit
@@ -1083,6 +1110,17 @@ local function BuildRow(id, unit, harmful, setting)
 
   rows[id] = row
   table.insert(rowOrder, row)
+
+  if mover and type(U.RegisterMover) == "function" then
+    U.RegisterMover(mover.id, row, {
+      label = mover.label,
+      default = mover.default,
+      visible = function()
+        return U.GetAuraSetting(setting) and true or false
+      end,
+    })
+  end
+
   return row
 end
 
@@ -1104,11 +1142,12 @@ local FILTER_COLUMN_X = 200
 local TOGGLE_COLUMN_X = 240
 
 local TOGGLES = {
-  { key = "playerEnabled",     text = "Player frame debuffs",  column = 0, row = 0 },
-  { key = "targetEnabled",     text = "Target frame debuffs",  column = 1, row = 0 },
-  { key = "targetBuffEnabled", text = "Target frame buffs",    column = 0, row = 1 },
-  { key = "showTimers",        text = "Timers on aura icons",  column = 1, row = 1 },
-  { key = "belowFrame",        text = "Show auras below the frame", column = 0, row = 2 },
+  { key = "playerEnabled",     text = "Player debuffs",  column = 0, row = 0 },
+  { key = "playerBuffEnabled", text = "Player buffs",    column = 1, row = 0 },
+  { key = "targetEnabled",     text = "Target debuffs",  column = 0, row = 1 },
+  { key = "targetBuffEnabled", text = "Target buffs",    column = 1, row = 1 },
+  { key = "showTimers",        text = "Timers on aura icons",  column = 0, row = 2 },
+  { key = "belowFrame",        text = "Grow aura rows downward", column = 1, row = 2 },
 }
 
 -- Laid out 2 per row (column, row) so the list reads as a table instead of a
@@ -1232,12 +1271,31 @@ function A:OnInit()
 end
 
 function A:OnEnable()
-  BuildRow("player", "player", true, "playerEnabled")
-  BuildRow("target", "target", true, "targetEnabled")
-  BuildRow("targetBuff", "target", false, "targetBuffEnabled")
+  -- Defaults sit above the shipped player/target unit-frame positions
+  -- (unitframes.lua SPECS: player BOTTOMRIGHT -75,125 / target BOTTOMLEFT 75,125).
+  BuildRow("player", "player", true, "playerEnabled", {
+    id = "auras.playerDebuffs",
+    label = "Player Debuffs",
+    default = { point = "BOTTOMRIGHT", relativePoint = "BOTTOM", x = -75, y = 175 },
+  })
+  BuildRow("playerBuff", "player", false, "playerBuffEnabled", {
+    id = "auras.playerBuffs",
+    label = "Player Buffs",
+    default = { point = "BOTTOMRIGHT", relativePoint = "BOTTOM", x = -75, y = 205 },
+  })
+  BuildRow("target", "target", true, "targetEnabled", {
+    id = "auras.targetDebuffs",
+    label = "Target Debuffs",
+    default = { point = "BOTTOMLEFT", relativePoint = "BOTTOM", x = 75, y = 175 },
+  })
+  BuildRow("targetBuff", "target", false, "targetBuffEnabled", {
+    id = "auras.targetBuffs",
+    label = "Target Buffs",
+    default = { point = "BOTTOMLEFT", relativePoint = "BOTTOM", x = 75, y = 205 },
+  })
 
   if table.getn(rowOrder) == 0 then
-    U.Error("aura rows could not be anchored; unit frames are unavailable")
+    U.Error("aura rows could not be created")
     return
   end
 

@@ -461,6 +461,10 @@ local function StyleQuestItems()
           count:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", -1, 1)
         end)
       end
+
+      if type(QtP) == "table" and type(QtP.AttachQuestItemPrice) == "function" then
+        QtP.AttachQuestItemPrice(item, "log")
+      end
     end
   end
 end

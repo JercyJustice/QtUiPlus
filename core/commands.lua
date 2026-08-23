@@ -1447,8 +1447,8 @@ handlers["price"] = function()
 
   if diag.setterCalls == 0 then
     U.Print("  |cffff5555No setter has fired.|r Hover a bag item, then run " ..
-            "this again. If it stays 0, this client fills bag tooltips " ..
-            "through something other than GameTooltip:SetBagItem.")
+            "this again. Bag slots go through SetBagItem after SetOwner " ..
+            "(ANCHOR_RIGHT); equipped items through SetInventoryItem.")
   end
 end
 

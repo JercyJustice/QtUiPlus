@@ -2349,19 +2349,33 @@ local data = {
 
 QtP.vendorPrices = data
 
--- Some custom clients extend GetItemInfo with a sellPrice return. Prefer the
--- live client value when it is there and fall back to the static table, rather
--- than assuming either source exists.
+-- Same lookup as QtUI Bags.lua GetVendorSellPrice:
+--   1. GetItemInfo's 11th return when a client provides it (TBC+ / some
+--      custom cores). Emberveil's wiki lists nine returns, so this is nil
+--      here and we fall through.
+--   2. Static table keyed by item id from `item:(%d+)` in the hyperlink, or
+--      from GetItemInfo's raw `item:id:...` link (wiki Item#getiteminfo).
+local function ItemIDFromLink(link)
+  if not link then return nil end
+  if type(link) == "number" then return link end
+  local _, _, id = string.find(tostring(link), "item:(%d+)")
+  return tonumber(id)
+end
+
 function QtP.VendorSellPrice(link)
   if not link then return nil end
 
-  local _, _, _, _, _, _, _, _, _, _, apiSellPrice = GetItemInfo(link)
+  -- pcall: ok, name, rawLink, quality, minLevel, type, subType, stackCount,
+  --        equipLoc, texture, extra10, extra11
+  local ok, _, rawLink, _, _, _, _, _, _, _, _, apiSellPrice = pcall(GetItemInfo, link)
   apiSellPrice = tonumber(apiSellPrice)
   if apiSellPrice then return apiSellPrice end
 
-  local _, _, itemID = string.find(link, "item:(%d+)")
-  itemID = tonumber(itemID)
-  local value = itemID and QtP.vendorPrices and QtP.vendorPrices[itemID]
+  local itemID = ItemIDFromLink(link)
+  if not itemID and ok then itemID = ItemIDFromLink(rawLink) end
+  if not itemID or itemID == 0 then return nil end
+
+  local value = QtP.vendorPrices and QtP.vendorPrices[itemID]
   if not value then return nil end
 
   local _, _, sell = string.find(value, "^(%d+),")

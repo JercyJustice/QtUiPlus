@@ -1347,23 +1347,48 @@ local function BuildPricePanel()
     panel.readout:SetPoint("LEFT", panel, "LEFT", 6, 0)
   end
 
+  if panel.EnableMouse then pcall(panel.EnableMouse, panel, false) end
   panel:Hide()
   return panel
 end
 
-local function ShowPricePanel(anchorFrame, copper)
+-- Public: bag slots and icon buttons share this panel. Injecting a sell line
+-- into GameTooltip does not reliably draw on this client (line pool /
+-- CreateBackdrop restyle), which is why the panel exists at all.
+function U.ShowPricePanel(anchorFrame, copper, caption)
+  if not anchorFrame or not tonumber(copper) then return end
   if not pricePanel then pricePanel = BuildPricePanel() end
+
+  if pricePanel.caption then
+    pricePanel.caption:SetText(caption or "Cost:")
+  end
 
   pricePanel.readout:SetAmount(copper)
   local width = LabelWidth(pricePanel.caption) + 4 +
                 (pricePanel.readout.contentWidth or 0) + 12
+
+  local tipWidth
+  if anchorFrame.GetWidth then
+    local ok, value = pcall(anchorFrame.GetWidth, anchorFrame)
+    tipWidth = ok and tonumber(value) or nil
+  end
+  if tipWidth and tipWidth > width then width = tipWidth end
+
   pricePanel:SetWidth(width)
   pricePanel:ClearAllPoints()
-  pricePanel:SetPoint("TOP", anchorFrame, "BOTTOM", 0, -4)
+  -- Under GameTooltip it reads as part of the item tooltip; under a button it
+  -- is the fallback when the tooltip did not show.
+  pricePanel:SetPoint("TOPLEFT", anchorFrame, "BOTTOMLEFT", 0, 1)
+  if anchorFrame.GetFrameLevel then
+    local ok, level = pcall(anchorFrame.GetFrameLevel, anchorFrame)
+    if ok and type(level) == "number" then
+      pcall(pricePanel.SetFrameLevel, pricePanel, level + 2)
+    end
+  end
   pricePanel:Show()
 end
 
-local function HidePricePanel()
+function U.HidePricePanel()
   if pricePanel then pricePanel:Hide() end
 end
 
@@ -1419,7 +1444,7 @@ function U.CreateIconButton(parent, options)
 
     if type(options.price) == "function" then
       local copper = options.price()
-      if tonumber(copper) then ShowPricePanel(button, copper) end
+      if tonumber(copper) then U.ShowPricePanel(button, copper, "Cost:") end
     end
   end)
 
@@ -1427,7 +1452,7 @@ function U.CreateIconButton(parent, options)
     U.SetBorderColor(button, M.Unpack(M.color.border))
     local tip = U.G("GameTooltip")
     if tip then pcall(tip.Hide, tip) end
-    HidePricePanel()
+    U.HidePricePanel()
   end)
 
   return button

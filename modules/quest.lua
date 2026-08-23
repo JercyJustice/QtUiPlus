@@ -250,6 +250,10 @@ local function StyleItemSlots()
         SetQuestFont(itemName, M.fontSize.normal, WHITE)
         SetQuestFont(G(name .. "Count"), M.fontSize.small, WHITE)
 
+        if type(QtP) == "table" and type(QtP.AttachQuestItemPrice) == "function" then
+          QtP.AttachQuestItemPrice(button, "giver")
+        end
+
         -- The accept frame separates each reward label from its icon during
         -- its native refresh on this client.  The horizontal offset survives,
         -- but the label is reset near the objectives heading, causing the

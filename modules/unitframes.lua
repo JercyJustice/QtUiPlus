@@ -126,9 +126,8 @@ end
 --
 -- Default anchors are UIParent-relative, which is what the mover position
 -- store requires. A frame with anchorTo instead rides another frame's mover:
--- target-of-target follows the target frame, and party members follow the
--- party anchor, so none of them can drift out of alignment with what they are
--- attached to.
+-- party members follow the party anchor so they cannot drift out of alignment.
+-- Target-of-target has its own mover, matching QtUI.
 -- ---------------------------------------------------------------------------
 -- Target-of-target shares PRIMARY_WIDTH with target rather than carrying its
 -- own literal, so the two can never drift apart again.
@@ -156,7 +155,7 @@ local SIZE_LIMITS = {
 local SIZE_GROUPS = {
   { key = "player",       label = "Player",           ids = { "player" },       power = true },
   { key = "target",       label = "Target",           ids = { "target" },       power = true },
-  { key = "targettarget", label = "Target of Target", ids = { "targettarget" }, power = false },
+  { key = "targettarget", label = "Target of Target", ids = { "targettarget" }, power = true },
   { key = "pet",          label = "Pet",              ids = { "pet" },          power = true },
   { key = "party",        label = "Party",
     ids = { "party1", "party2", "party3", "party4" }, power = true, spacing = true },
@@ -185,14 +184,13 @@ local SPECS = {
   {
     -- width matches target's, by request -- see PRIMARY_WIDTH above.
     id = "targettarget", unit = "targettarget", name = "TargetTarget",
-    label = "Target of target",
-    -- One health bar only: its fixed-colour name is centred above the fill,
-    -- on a raised child layer within the target-of-target frame.
-    -- 18px is half the previous 35px height, rounded to an integer pixel.
-    width = PRIMARY_WIDTH, health = 18, healthText = "nameplain", gap = 0,
-    anchorTo = "target",
-    anchorPoint = "TOP", anchorRelativePoint = "BOTTOM",
-    anchorOffsetX = 0, anchorOffsetY = 1,
+    label = "Target of Target",
+    -- Name on the health bar, power bar underneath (QtUI ToT had a mana bar
+    -- height control). Own mover, not glued to the target.
+    width = PRIMARY_WIDTH, health = 18, power = 8, gap = 0,
+    healthText = "nameplain",
+    powerLabels = { right = "powerdyn" },
+    default = { point = "BOTTOMLEFT", relativePoint = "BOTTOM", x = 75, y = 80 },
   },
   {
     -- Hunter (or warlock) pet frame: portrait to the left, health/power
@@ -1211,6 +1209,10 @@ local function ResizeFrame(frame)
     ResizeBarBox(frame.power, spec.width, spec.power, border)
     frame.power:ClearAllPoints()
     frame.power:SetPoint("TOPLEFT", frame.health, "BOTTOMLEFT", 0, -spec.gap)
+  elseif spec.power and not frame.power then
+    -- ToT gained a power bar after a saved layout that had none: rebuild
+    -- cannot add the child here; the next /reload applies the spec. Health
+    -- still resizes live.
   end
 
   -- Anchored frames (targettarget, the party members) carry their offset in
@@ -1220,6 +1222,104 @@ local function ResizeFrame(frame)
     frame:SetPoint(spec.anchorPoint or "TOPLEFT", frames[spec.anchorTo],
                    spec.anchorRelativePoint or "TOPLEFT",
                    spec.anchorOffsetX or 0, spec.anchorOffsetY or 0)
+  end
+end
+
+local UNIT_RESIZE_GRIP = 14
+local UNIT_RESIZE_IDS = { targettarget = true, pet = true }
+
+local function CommitUnitResize(frame)
+  if not frame or not frame.spec or not sizeCfg then return end
+  local spec = frame.spec
+  local groupKey = spec.id
+
+  local border = U.BorderSize()
+  local w, h
+  if frame.GetWidth then
+    local ok, value = pcall(frame.GetWidth, frame)
+    if ok then w = tonumber(value) end
+  end
+  if frame.GetHeight then
+    local ok, value = pcall(frame.GetHeight, frame)
+    if ok then h = tonumber(value) end
+  end
+  if not w or not h then return end
+
+  local barOffset = 0
+  if frame.qtpHasPortrait then barOffset = h + PORTRAIT_GAP end
+
+  local innerW = w - barOffset - 2 * border
+  innerW = ClampSize("width", innerW)
+
+  local chrome = 2 * border
+  if spec.power then
+    chrome = chrome + spec.gap + spec.power + 2 * border
+  end
+  local innerH = ClampSize("healthHeight", h - chrome)
+
+  sizeCfg[groupKey .. "Width"] = innerW
+  sizeCfg[groupKey .. "HealthHeight"] = innerH
+  if spec.power then
+    sizeCfg[groupKey .. "PowerHeight"] = spec.power
+  end
+
+  ApplySizesToSpecs()
+  ResizeFrame(frame)
+
+  local moverId = "unitframes." .. spec.id
+  local point, _, relativePoint, x, y = U.GetFramePoint(frame, 1)
+  if point and type(U.SavePosition) == "function" then
+    U.SavePosition(moverId, point, relativePoint, x, y)
+  end
+end
+
+local function AttachUnitResizeGrip(frame)
+  if not frame or frame.qtpResizeGrip then return end
+  if not (frame.spec and UNIT_RESIZE_IDS[frame.spec.id]) then return end
+
+  local grip = CreateFrame("Button", nil, frame)
+  grip:SetWidth(UNIT_RESIZE_GRIP)
+  grip:SetHeight(UNIT_RESIZE_GRIP)
+  grip:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 2, -2)
+  pcall(grip.EnableMouse, grip, true)
+  grip:RegisterForDrag("LeftButton")
+
+  local levelOk, level = pcall(frame.GetFrameLevel, frame)
+  if levelOk and tonumber(level) then
+    pcall(grip.SetFrameLevel, grip, level + 20)
+  end
+
+  local icon = grip:CreateTexture(nil, "ARTWORK")
+  pcall(icon.SetTexture, icon, M.texture.chatResizeGrip)
+  icon:SetAllPoints(grip)
+
+  grip:SetScript("OnDragStart", function()
+    if not U.IsUnlocked or not U.IsUnlocked() then return end
+    pcall(frame.SetResizable, frame, true)
+    pcall(frame.SetMinResize, frame,
+          SIZE_LIMITS.width.min, SIZE_LIMITS.healthHeight.min)
+    pcall(frame.StartSizing, frame, "BOTTOMRIGHT")
+  end)
+  grip:SetScript("OnDragStop", function()
+    pcall(frame.StopMovingOrSizing, frame)
+    CommitUnitResize(frame)
+  end)
+
+  frame.qtpResizeGrip = grip
+  grip:Hide()
+end
+
+local function UpdateUnitResizeGrips()
+  local show = U.IsUnlocked and U.IsUnlocked()
+  local id, frame
+  for id, frame in pairs(frames) do
+    if frame and frame.qtpResizeGrip then
+      if show then
+        pcall(frame.qtpResizeGrip.Show, frame.qtpResizeGrip)
+      else
+        pcall(frame.qtpResizeGrip.Hide, frame.qtpResizeGrip)
+      end
+    end
   end
 end
 
@@ -1944,6 +2044,7 @@ local refreshCycle = 0
 local function RefreshScheduledUnits()
   if U.PerfDisabled and U.PerfDisabled("frames") then return end
 
+  UpdateUnitResizeGrips()
   refreshCycle = refreshCycle + 1
 
   -- Two pcall'd reads for druids, nothing at all for every other class: form
@@ -2482,13 +2583,18 @@ function UF:OnEnable()
                      spec.anchorRelativePoint or "TOPLEFT",
                      spec.anchorOffsetX or 0, spec.anchorOffsetY or 0)
     else
-      U.RegisterMover("unitframes." .. spec.id, frame, {
+      local options = {
         label = spec.label,
         default = spec.default,
-      })
+      }
+      if spec.id == "targettarget" then
+        options.visible = function() return ShowTargetTarget() end
+      end
+      U.RegisterMover("unitframes." .. spec.id, frame, options)
     end
 
     EnableMouse(frame)
+    AttachUnitResizeGrip(frame)
   end
 
   RegisterEvents()

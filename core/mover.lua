@@ -301,6 +301,10 @@ local function ShowHandle(entry)
   end
 
   if not entry.handle then CreateHandle(entry) end
+  -- Aura rows (and similar) hide when empty. Edit mode still needs the
+  -- handle, so the frame has to be shown first -- a child of a hidden parent
+  -- never receives drags.
+  if entry.frame and entry.frame.Show then pcall(entry.frame.Show, entry.frame) end
   entry.handle:Show()
   -- rendering.parent_alpha_not_propagated: children are shown and hidden
   -- explicitly rather than relying on the parent's visibility carrying.
@@ -423,16 +427,7 @@ local function CreateEditPanel()
     height = 24,
     onClick = function() U.LockUI() end,
   })
-  editPanel.save:SetPoint("BOTTOM", editPanel, "BOTTOM", -38, 12)
-
-  editPanel.reset = U.CreateButton(editPanel, {
-    name = "QtUiPlusEditReset",
-    text = "Reset",
-    width = 68,
-    height = 24,
-    onClick = function() U.ResetPositions() end,
-  })
-  editPanel.reset:SetPoint("BOTTOM", editPanel, "BOTTOM", 68, 12)
+  editPanel.save:SetPoint("BOTTOM", editPanel, "BOTTOM", 0, 12)
 
   editPanel:Hide()
 end
@@ -449,7 +444,6 @@ local function ShowEditOverlay()
   if editPanel.hint then editPanel.hint:Show() end
   if editPanel.hint2 then editPanel.hint2:Show() end
   if editPanel.save then editPanel.save:Show() end
-  if editPanel.reset then editPanel.reset:Show() end
 end
 
 local function HideEditOverlay()
@@ -460,7 +454,6 @@ local function HideEditOverlay()
   if editPanel.hint then editPanel.hint:Hide() end
   if editPanel.hint2 then editPanel.hint2:Hide() end
   if editPanel.save then editPanel.save:Hide() end
-  if editPanel.reset then editPanel.reset:Hide() end
   editPanel:Hide()
 end
 

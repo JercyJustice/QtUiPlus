@@ -19,9 +19,16 @@ function U.PostHookScript(frame, script, callback)
   local ok, previous = pcall(frame.GetScript, frame, script)
   if not ok then return false end
 
+  -- Bind `this` to the first argument (the widget) and pcall the previous
+  -- handler. This client does not consistently populate the legacy `this`
+  -- global (core/init.lua) and XML OnEnter scripts still read it; an error
+  -- there used to abort the wrapper before `callback` ran.
   return pcall(frame.SetScript, frame, script,
     function(a1, a2, a3, a4, a5, a6, a7, a8, a9)
-      if previous then previous(a1, a2, a3, a4, a5, a6, a7, a8, a9) end
+      local savedThis = this
+      if a1 ~= nil then this = a1 end
+      if previous then pcall(previous, a1, a2, a3, a4, a5, a6, a7, a8, a9) end
+      this = savedThis
       callback(a1, a2, a3, a4, a5, a6, a7, a8, a9)
     end)
 end
