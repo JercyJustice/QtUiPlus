@@ -198,6 +198,7 @@ local GLOBALS = {
   { key = "showCount",    text = "Show item counts" },
   { key = "showCooldown", text = "Show cooldown timers" },
   { key = "showGCD",      text = "Show global cooldown wipe" },
+  { key = "rangeColor",   text = "Tint out-of-range abilities red" },
 }
 
 local function BuildGeneralPage(parent)

@@ -109,6 +109,10 @@ local GLOBAL_DEFAULTS = {
   showCount    = true,
   showCooldown = true,
   showGCD      = true,
+  -- Tint a button red while its target is out of range. On by default; QtUI
+  -- called this barRangeColor and let it be switched off, because the tint
+  -- fights a class that is meant to be at range most of the time.
+  rangeColor   = true,
 }
 
 -- Native binding names for the slot ranges the stock UI owns. Bar 6 and any
@@ -1109,6 +1113,9 @@ local function UpdateUsable(button)
     if Has("ActionHasRange") then
       hasRange = Call("ActionHasRange", slot) and true or false
     end
+    -- The setting gates the tint only; the range CALLS are still skipped
+    -- entirely when it is off, so nothing is paid for a disabled feature.
+    if not U.GetActionBarGlobal("rangeColor") then hasRange = false end
     if hasRange then
       local inRange = Call("IsActionInRange", slot)
       if tonumber(inRange) == 0 or inRange == false then

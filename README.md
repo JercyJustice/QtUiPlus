@@ -79,6 +79,13 @@ supports directly: `GetNumShapeshiftForms()` returns the slots the player
 actually has, and `0` for a class with no stance bar. A class with no forms still
 never gets a frame, a button or a mover built.
 
+## Settings
+
+`/qtp` opens the panel. Pages: General (incl. edit-mode grid size), Frame Sizes
+(Player / Target / Target of Target / Pet / Party), Unit Frames, Combo Points,
+Energy Tick, Experience Bar, Bags, Chat, Damage Meter, Profiles, Extras, and the
+ActionBars group (General Options, Bar 1-10, Pet Bar, Stance Bar).
+
 ## Architecture notes
 
 `core/qtcompat.lua` is the bridge. The ported QtUI modules keep their original
