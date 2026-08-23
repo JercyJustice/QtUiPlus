@@ -188,6 +188,9 @@ local function StyleFrame()
   -- own outline from plain textures instead (core/style.lua).
   StyleTooltipFrame(tooltip, "GameTooltip")
   StyleStatusBar()
+  -- A leftover empty tooltip on top of a unit frame eats clicks (party
+  -- targeting). Wiki Frame#enablemouse. Never mouse-enable GameTooltip.
+  pcall(tooltip.EnableMouse, tooltip, false)
 end
 
 -- ---------------------------------------------------------------------------
@@ -383,6 +386,7 @@ local function InstallTriggers()
     local ok, frame = pcall(CreateFrame, "Frame", nil, tooltip)
     if ok and frame then
       pcall(frame.SetAllPoints, frame, tooltip)
+      pcall(frame.EnableMouse, frame, false)
       if pcall(frame.SetScript, frame, "OnShow", Restyle) then
         installed = true
       end
@@ -431,6 +435,21 @@ local tooltipAnchor
 local ownedBy
 local ownedAnchor
 local itemCursor
+
+-- SetOwner anchors that already chose a widget. OnShow must not re-pin those
+-- to the dummy (that is what parked an empty black box on the party frame).
+local KEEP_OWNER_ANCHOR = {
+  ANCHOR_TOPRIGHT = true,
+  ANCHOR_RIGHT = true,
+  ANCHOR_BOTTOMRIGHT = true,
+  ANCHOR_TOPLEFT = true,
+  ANCHOR_LEFT = true,
+  ANCHOR_BOTTOMLEFT = true,
+  ANCHOR_TOP = true,
+  ANCHOR_BOTTOM = true,
+  ANCHOR_CURSOR = true,
+  ANCHOR_PRESERVE = true,
+}
 
 -- Item fills that should follow the mouse. Compare setters
 -- (SetMerchantCompareItem / SetAuctionCompareItem) stay on ShoppingTooltip
@@ -511,8 +530,37 @@ local function HookSetOwner(tooltip)
   if original == nil then return end
   tooltip.SetOwner = function(self, owner, anchor, x, y)
     RememberOwner(owner, anchor)
-    local ok, r1, r2, r3 = pcall(original, self, owner, anchor, x, y)
+    -- Do not pass padding nils: some widget bindings treat a fifth argument
+    -- as a real offset (wiki: non-numbers become 0) and skip the anchor.
+    local ok, r1, r2, r3
+    if x ~= nil or y ~= nil then
+      ok, r1, r2, r3 = pcall(original, self, owner, anchor, x, y)
+    else
+      ok, r1, r2, r3 = pcall(original, self, owner, anchor)
+    end
     if ok then return r1, r2, r3 end
+  end
+end
+
+-- Unit/aura fills are never cursor items. A leftover itemCursor flag from a
+-- bag/vendor hover was parking their empty GameTooltip on the party frame.
+local UNIT_SETTERS = {
+  "SetUnit", "SetUnitBuff", "SetUnitDebuff", "SetPlayerBuff",
+}
+
+local function HookUnitSetters(tooltip)
+  if not tooltip then return end
+  local i
+  for i = 1, table.getn(UNIT_SETTERS) do
+    local name = UNIT_SETTERS[i]
+    local original = tooltip[name]
+    if original ~= nil then
+      tooltip[name] = function(self, a, b, c, d)
+        itemCursor = false
+        local ok, r1, r2, r3 = pcall(original, self, a, b, c, d)
+        if ok then return r1, r2, r3 end
+      end
+    end
   end
 end
 
@@ -572,6 +620,7 @@ function TT.OnEnable()
 
   local tooltip = U.G("GameTooltip")
   HookSetOwner(tooltip)
+  HookUnitSetters(tooltip)
   HookCursorSetters(tooltip)
 
   -- Vanilla world-unit tooltips go through this global with UIParent or
@@ -592,10 +641,12 @@ function TT.OnEnable()
   if tooltip then
     U.PostHookScript(tooltip, "OnShow", function()
       local kind = AnchorType(tooltip) or ownedAnchor
-      if itemCursor or kind == "ANCHOR_CURSOR" or kind == "ANCHOR_PRESERVE" then
+      if itemCursor or (kind and KEEP_OWNER_ANCHOR[kind]) then
+        pcall(tooltip.EnableMouse, tooltip, false)
         return
       end
       if IsCornerTooltip(tooltip) then PlaceAtAnchor(tooltip) end
+      pcall(tooltip.EnableMouse, tooltip, false)
     end)
     U.PostHookScript(tooltip, "OnHide", function()
       itemCursor = false
@@ -613,6 +664,7 @@ function TT.OnEnable()
     if frame then
       U.PostHookScript(frame, "OnShow", function()
         StyleTooltipFrame(frame, name)
+        pcall(frame.EnableMouse, frame, false)
       end)
     end
   end

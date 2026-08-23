@@ -599,10 +599,19 @@ local function ShowIconTooltip(row, icon)
 
   pcall(tooltip.SetOwner, tooltip, icon, "ANCHOR_RIGHT")
   local setter = row.harmful and tooltip.SetUnitDebuff or tooltip.SetUnitBuff
-  if type(setter) ~= "function" or not pcall(setter, tooltip, row.unit, index) then
+  local ok, built = pcall(setter, tooltip, row.unit, index)
+  local lines = 0
+  if tooltip.NumLines then
+    local nOk, n = pcall(tooltip.NumLines, tooltip)
+    if nOk then lines = tonumber(n) or 0 end
+  end
+  -- pcall succeeds when SetUnitBuff returns false (no aura). Showing that
+  -- empty GameTooltip is the black box beside party buffs.
+  if not ok or built == false or lines < 1 then
     pcall(tooltip.Hide, tooltip)
     return
   end
+  pcall(tooltip.EnableMouse, tooltip, false)
   pcall(tooltip.Show, tooltip)
 end
 

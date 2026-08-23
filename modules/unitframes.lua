@@ -2429,6 +2429,12 @@ local function UsePendingAction(unit, button)
   return nil
 end
 
+local function TooltipLineCount(tooltip)
+  if not tooltip or not tooltip.NumLines then return 0 end
+  local ok, n = pcall(tooltip.NumLines, tooltip)
+  return (ok and tonumber(n)) or 0
+end
+
 local function ShowFrameTooltip(owner, unit)
   local tooltip = U.G("GameTooltip")
   if not tooltip then return end
@@ -2436,9 +2442,16 @@ local function ShowFrameTooltip(owner, unit)
   -- anchor sits the tooltip on top of the frame, so the mouse "leaves"
   -- the click layer and the tooltip vanishes immediately.
   pcall(tooltip.SetOwner, tooltip, owner, "ANCHOR_RIGHT")
-  if pcall(tooltip.SetUnit, tooltip, unit) then
-    pcall(tooltip.Show, tooltip)
+  local ok, built = pcall(tooltip.SetUnit, tooltip, unit)
+  -- pcall is true even when SetUnit returns false (wiki: no tooltip built).
+  -- Showing that empty frame is the black box on the party frame, and a
+  -- mouse-enabled leftover eats TargetUnit clicks.
+  if not ok or built == false or TooltipLineCount(tooltip) < 1 then
+    pcall(tooltip.Hide, tooltip)
+    return
   end
+  pcall(tooltip.EnableMouse, tooltip, false)
+  pcall(tooltip.Show, tooltip)
 end
 
 local function HideFrameTooltip()
@@ -2459,10 +2472,28 @@ local function BindUnitClicks(click, frame)
     end
   end)
 
+  -- Target on MouseDown so a tooltip that appears on enter cannot steal the
+  -- MouseUp / OnClick. Protected TargetUnit still needs a hardware click.
+  click:SetScript("OnMouseDown", function(a, b)
+    local button = ResolveClickButton(a, b)
+    if button ~= "LeftButton" then return end
+    if UsePendingAction(frame.unit, button) then
+      click.qtpUsedPending = true
+      return
+    end
+    local target = U.G("TargetUnit")
+    if type(target) == "function" then pcall(target, frame.unit) end
+    click.qtpDidTarget = true
+  end)
+
   click:SetScript("OnClick", function(a, b)
     local button = ResolveClickButton(a, b)
     if click.qtpUsedPending then
       click.qtpUsedPending = nil
+      return
+    end
+    if click.qtpDidTarget then
+      click.qtpDidTarget = nil
       return
     end
     if UsePendingAction(frame.unit, button) then return end
