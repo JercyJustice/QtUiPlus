@@ -128,6 +128,21 @@ local function StyleIcon(name, quality)
   U.StyleItemSlot(icon, name .. "IconFrame")
   pcall(icon.SetWidth, icon, ICON)
   pcall(icon.SetHeight, icon, ICON)
+
+  -- U.StyleItemSlot crops and pins $parentIconTexture, the name a bag slot
+  -- uses. Read out of QtUiPlusDiagDB.rollAuto, this frame calls it
+  -- $parentIconFrameIcon instead, and it was drawing 34x34 out of a 32 button
+  -- with no inset, so it is placed here by whichever of the two names resolves.
+  local texture = U.G(name .. "IconFrameIconTexture") or U.G(name .. "IconFrameIcon")
+  if texture then
+    local edge = U.BorderSize()
+    pcall(texture.SetTexCoord, texture, 0.08, 0.92, 0.08, 0.92)
+    pcall(function()
+      texture:ClearAllPoints()
+      texture:SetPoint("TOPLEFT", icon, "TOPLEFT", edge, -edge)
+      texture:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", -edge, edge)
+    end)
+  end
   pcall(function()
     icon:ClearAllPoints()
     icon:SetPoint("LEFT", U.G(name), "LEFT", PAD, 0)
@@ -153,17 +168,45 @@ end
 -- that order, anything else found is appended, and the row is then sorted by
 -- the x the client had already given each button -- so it reads left to right
 -- in the client's own order whatever the buttons turn out to be called.
+-- Frame identity is not usable on this client.
+--
+-- Read out of QtUiPlusDiagDB.rollAuto: the item icon ended up sized 24x24 and
+-- anchored into the button row, and the name was 76 wide -- which is exactly
+-- NameWidth(6), so six buttons had been collected from a frame that has four.
+-- Both follow from the same cause: the object U.G(name) returns does not
+-- compare equal to the object GetChildren() hands back for that same frame, so
+-- "child ~= icon" never excluded the icon and "seen[button]" never recognised
+-- Greed and Pass as already collected. Names are compared instead, everywhere.
+local function NameOf(object)
+  if not object or type(object.GetName) ~= "function" then return nil end
+  local ok, value = pcall(object.GetName, object)
+  if ok and type(value) == "string" then return value end
+  return nil
+end
+
+-- The roll buttons.
+--
+-- Read out of the same dump: this client's dice is $parentRollButton, not
+-- $parentNeedButton, which is why two of three buttons took the styling and the
+-- dice kept its stock size and spilled over the coin. Both names are listed so
+-- either shape works, in retail's order; anything else found among the frame's
+-- Button children is appended, so a name nobody guessed still lands in the row.
 local function CollectButtons(name, frame)
   local list, seen = {}, {}
-  local icon = U.G(name .. "IconFrame")
-  local known = { "NeedButton", "GreedButton", "PassButton" }
+  local iconName = name .. "IconFrame"
+  local known = { "RollButton", "NeedButton", "GreedButton", "PassButton" }
+
+  local function Take(button)
+    if not button then return end
+    local key = NameOf(button) or button
+    if key == iconName or seen[key] then return end
+    seen[key] = true
+    table.insert(list, button)
+  end
+
   local i
   for i = 1, table.getn(known) do
-    local button = U.G(name .. known[i])
-    if button and not seen[button] then
-      seen[button] = true
-      table.insert(list, button)
-    end
+    Take(U.G(name .. known[i]))
   end
 
   if frame.GetChildren then
@@ -171,12 +214,9 @@ local function CollectButtons(name, frame)
     if ok and type(children) == "table" then
       for i = 1, table.getn(children) do
         local child = children[i]
-        if child and child ~= icon and not seen[child] and child.GetObjectType then
+        if child and child.GetObjectType then
           local typeOk, objectType = pcall(child.GetObjectType, child)
-          if typeOk and objectType == "Button" then
-            seen[child] = true
-            table.insert(list, child)
-          end
+          if typeOk and objectType == "Button" then Take(child) end
         end
       end
     end
@@ -273,6 +313,28 @@ end
 local function StyleTimer(name, frame)
   local bar = U.G(name .. "Timer")
   if not bar then return end
+
+  -- The bar's own stock art. QtUiPlusDiagDB.rollAuto caught a 156x20
+  -- UI-Character-Skills-BarBorder still drawing on this StatusBar, anchored
+  -- above it -- stock chrome the flat card should not carry. The fill itself is
+  -- a region too and must survive, so regions are judged by their texture path:
+  -- the plain white QtUiPlus draws with stays, anything else goes.
+  if bar.GetRegions then
+    local ok, regions = pcall(function() return { bar:GetRegions() } end)
+    if ok and type(regions) == "table" then
+      local i
+      for i = 1, table.getn(regions) do
+        local region = regions[i]
+        if region and region.GetTexture then
+          local pathOk, path = pcall(region.GetTexture, region)
+          if pathOk and type(path) == "string" and
+             not string.find(string.lower(path), "white8x8", 1, true) then
+            pcall(region.SetAlpha, region, 0)
+          end
+        end
+      end
+    end
+  end
   pcall(bar.SetStatusBarTexture, bar, M.texture.plain)
   pcall(bar.SetStatusBarColor, bar, M.Unpack(M.color.accent))
   U.CreateBackdrop(bar, { background = M.color.healthBg, border = false })
