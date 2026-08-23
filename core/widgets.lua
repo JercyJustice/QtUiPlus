@@ -333,23 +333,58 @@ local function CloseSelectMenu()
   selectOwner = nil
 end
 
+-- GetLeft/GetBottom on a child of a ScrollFrame report the unscrolled layout
+-- position on this client (wiki ScrollFrame SetVerticalScroll offsets drawing
+-- without moving those edges). Walk ancestors and add the scroll so a popup
+-- parented to UIParent lands on the visible control, not on the action bars.
+local function VisualEdges(frame)
+  if not frame then return 0, 0, 0 end
+  local left = tonumber(frame:GetLeft()) or 0
+  local bottom = tonumber(frame:GetBottom()) or 0
+  local top = tonumber(frame:GetTop()) or 0
+  local parent = frame
+  while parent do
+    if type(parent.GetVerticalScroll) == "function" then
+      local ok, scroll = pcall(parent.GetVerticalScroll, parent)
+      scroll = (ok and tonumber(scroll)) or 0
+      bottom = bottom + scroll
+      top = top + scroll
+    end
+    parent = parent.GetParent and parent:GetParent() or nil
+  end
+  return left, bottom, top
+end
+
+-- wiki Cursor#getcursorposition: UI pixels, origin bottom-left, Y up. Same
+-- space as Region:GetLeft/GetBottom and SetPoint on UIParent.
+local function CursorUI()
+  local fn = U.G("GetCursorPosition")
+  if type(fn) ~= "function" then return nil, nil end
+  local ok, x, y = pcall(fn)
+  if not ok then return nil, nil end
+  return tonumber(x), tonumber(y)
+end
+
 local function EnsureSelectMenu()
   if selectMenu then return end
 
+  -- Invisible full-screen hit target. The menu is a child so its rows sit
+  -- above this button in hit-testing; a sibling at DIALOG stole every click.
   selectCatcher = CreateFrame("Button", "QtUiPlusSelectCatcher", UIParent)
   selectCatcher:SetAllPoints(UIParent)
-  pcall(selectCatcher.SetFrameStrata, selectCatcher, "DIALOG")
+  pcall(selectCatcher.SetFrameStrata, selectCatcher, "TOOLTIP")
   pcall(selectCatcher.EnableMouse, selectCatcher, true)
+  pcall(selectCatcher.RegisterForClicks, selectCatcher, "LeftButtonUp")
   selectCatcher:SetScript("OnClick", CloseSelectMenu)
   selectCatcher:Hide()
 
-  selectMenu = U.CreatePanel(UIParent, {
+  selectMenu = U.CreatePanel(selectCatcher, {
     name = "QtUiPlusSelectMenu",
     width = 200,
     height = 20,
+    background = { 0.06, 0.06, 0.06, 0.97 },
   })
-  pcall(selectMenu.SetFrameStrata, selectMenu, "DIALOG")
-  pcall(selectMenu.EnableMouse, selectMenu, true)
+  pcall(selectMenu.EnableMouse, selectMenu, false)
   selectMenu:Hide()
   selectMenu.rows = {}
 end
@@ -388,6 +423,7 @@ local function OpenSelectMenu(control)
         height = SELECT_ROW_H,
         size = M.fontSize.small,
       })
+      pcall(row.RegisterForClicks, row, "LeftButtonUp")
       selectMenu.rows[i] = row
     end
     row:SetWidth(width)
@@ -404,27 +440,36 @@ local function OpenSelectMenu(control)
       pcall(row.label.SetTextColor, row.label, M.Unpack(color))
     end
     local key = spec.key
-    row:SetScript("OnClick", function()
+    local function Pick()
       local owner = selectOwner
       CloseSelectMenu()
       if not owner then return end
       owner.SetValue(key)
       if type(owner.onChange) == "function" then owner.onChange(key) end
-    end)
+    end
+    row:SetScript("OnClick", Pick)
+    row:SetScript("OnMouseUp", Pick)
     row:Show()
   end
   for i = n + 1, table.getn(selectMenu.rows) do
     selectMenu.rows[i]:Hide()
   end
 
-  local left = 0
-  local bottom = 0
-  local top = 0
-  if control.button then
-    left = tonumber(control.button:GetLeft()) or 0
-    bottom = tonumber(control.button:GetBottom()) or 0
-    top = tonumber(control.button:GetTop()) or 0
+  local left, bottom, top = VisualEdges(control.button)
+  local cx, cy = CursorUI()
+  -- The list is opened from a click on the button. If GetBottom still disagrees
+  -- with the cursor (scroll compensation missed a parent), hang the list from
+  -- the click itself rather than dropping it onto the action bars.
+  if cy and (bottom < cy - 48 or bottom > cy + 48) then
+    local h = 20
+    if control.button and control.button.GetHeight then
+      h = tonumber(control.button:GetHeight()) or 20
+    end
+    bottom = cy - (h * 0.35)
+    top = bottom + h
+    if (not left or left == 0) and cx then left = cx end
   end
+
   selectMenu:ClearAllPoints()
   if (bottom - height) > 8 then
     selectMenu:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, bottom)
@@ -433,8 +478,10 @@ local function OpenSelectMenu(control)
   end
 
   selectOwner = control
-  pcall(selectCatcher.SetFrameLevel, selectCatcher, 1)
-  pcall(selectMenu.SetFrameLevel, selectMenu, 20)
+  pcall(selectCatcher.SetFrameStrata, selectCatcher, "TOOLTIP")
+  if type(selectCatcher.Raise) == "function" then
+    pcall(selectCatcher.Raise, selectCatcher)
+  end
   selectCatcher:Show()
   selectMenu:Show()
 end
