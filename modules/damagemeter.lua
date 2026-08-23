@@ -1665,10 +1665,12 @@ local function LayoutCenterPanel(frame, width, height, title, hint)
   frame.lastLeft = left
   frame.lastBottom = bottom
   PlaceBox(frame.close, frame, width - 22, height - 20, 16, 16)
-  frame.title:ClearAllPoints()
-  frame.title:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 10, height - 16)
-  frame.title:SetPoint("TOPRIGHT", frame, "BOTTOMLEFT", width - 28, height - 4)
+  -- Emberveil FontStrings need an explicit BOTTOMLEFT/TOPRIGHT pixel box;
+  -- a single LEFT/CENTER point keeps the template size and draws nothing.
+  PlaceBox(frame.title, frame, 10, height - 16, width - 36, 12)
+  if frame.title.SetJustifyH then pcall(frame.title.SetJustifyH, frame.title, "LEFT") end
   frame.title:SetText(title or "")
+  if frame.title.Show then pcall(frame.title.Show, frame.title) end
   if hint and hint ~= "" then
     frame.hint:ClearAllPoints()
     frame.hint:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 10, height - TITLE_H - 2)
@@ -2143,6 +2145,9 @@ local function ShowFightPage()
         QtP.ApplyBodyFont(btn.text)
       end
       QtP.PaintListRow(btn, active)
+      PlaceBox(btn.text, btn, 8, 2, width - 32, FIGHT_ROW - 6)
+      if btn.text.SetJustifyH then pcall(btn.text.SetJustifyH, btn.text, "LEFT") end
+      if btn.text.Show then pcall(btn.text.Show, btn.text) end
       if btn.Show then pcall(btn.Show, btn) end
       if btn.EnableMouse then btn:EnableMouse(true) end
     else
@@ -2156,9 +2161,10 @@ local function ShowFightPage()
   if showPager then
     PlaceBox(frame.prev, frame, 10, 8, 28, 18)
     PlaceBox(frame.next, frame, width - 38, 8, 28, 18)
-    frame.page:ClearAllPoints()
-    frame.page:SetPoint("CENTER", frame, "BOTTOMLEFT", width / 2, 17)
+    PlaceBox(frame.page, frame, 46, 8, width - 92, 18)
+    if frame.page.SetJustifyH then pcall(frame.page.SetJustifyH, frame.page, "CENTER") end
     frame.page:SetText(tostring(fightPage) .. " / " .. tostring(pages))
+    if frame.page.Show then pcall(frame.page.Show, frame.page) end
     if frame.prev.Show then pcall(frame.prev.Show, frame.prev) end
     if frame.next.Show then pcall(frame.next.Show, frame.next) end
     if frame.prev.EnableMouse then frame.prev:EnableMouse(fightPage > 1) end
@@ -3255,6 +3261,9 @@ local function ToggleModeMenu(frame)
     else
       btn.text:SetText(spec.label)
     end
+    PlaceBox(btn.text, btn, 8, 2, width - 36, rowH - 7)
+    if btn.text.SetJustifyH then pcall(btn.text.SetJustifyH, btn.text, "LEFT") end
+    if btn.text.Show then pcall(btn.text.Show, btn.text) end
     if btn.Show then pcall(btn.Show, btn) end
     if btn.EnableMouse then btn:EnableMouse(true) end
   end
