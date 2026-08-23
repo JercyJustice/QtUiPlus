@@ -1250,15 +1250,7 @@ local function EnsureReportMenu()
   local menu = CreateFrame("Frame", "QtPMeterReportMenu", UIParent)
   menu:SetFrameStrata("TOOLTIP")
   menu:SetFrameLevel(200)
-  if menu.SetBackdrop then
-    pcall(menu.SetBackdrop, menu, {
-      bgFile = "Interface\\Buttons\\WHITE8X8",
-      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-      tile = true, tileSize = 8, edgeSize = 10,
-      insets = { left = 2, right = 2, top = 2, bottom = 2 },
-    })
-    QtP.PaintPanel(menu)
-  end
+  QtP.PaintPanel(menu)
   local channels = {
     { "SELF", "Self" },
     { "PARTY", "Party" },
@@ -1284,11 +1276,12 @@ local function EnsureReportMenu()
     btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     btn.text:SetPoint("LEFT", btn, "LEFT", 6, 0)
     btn.text:SetText(spec[2])
+    QtP.ApplyBodyFont(btn.text)
     btn:SetScript("OnEnter", function()
-      if this.text then this.text:SetTextColor(1, .9, .48) end
+      if this.text then this.text:SetTextColor(.96, .68, .04) end
     end)
     btn:SetScript("OnLeave", function()
-      if this.text then this.text:SetTextColor(1, .82, .2) end
+      if this.text then this.text:SetTextColor(.90, .90, .90) end
     end)
     btn:SetScript("OnClick", function()
       local source = reportSource
@@ -1372,13 +1365,15 @@ MakeDetailBar = function(parent)
   bar.bg = bar:CreateTexture(nil, "BACKGROUND")
   bar.bg:SetAllPoints(bar)
   bar.bg:SetTexture("Interface\\Buttons\\WHITE8X8")
-  bar.bg:SetVertexColor(.04, .05, .06, .7)
+  bar.bg:SetVertexColor(.10, .10, .10, .90)
   bar.left = bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   bar.left:SetPoint("LEFT", bar, "LEFT", 4, 0)
   bar.left:SetJustifyH("LEFT")
   bar.right = bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   bar.right:SetPoint("RIGHT", bar, "RIGHT", -4, 0)
   bar.right:SetJustifyH("RIGHT")
+  QtP.ApplyBodyFont(bar.left)
+  QtP.ApplyMutedFont(bar.right)
   return bar
 end
 
@@ -1506,8 +1501,8 @@ local function CompareRows(unitA, rowA, unitB, rowB)
     local best = a
     if b > best then best = b end
     local tint = { .45, .45, .48 }
-    if a > b then tint = { .18, .62, .45 } end
-    if b > a then tint = { .72, .38, .28 } end
+    if a > b then tint = { .25, .75, .30 } end
+    if b > a then tint = { .75, .20, .18 } end
     table.insert(rows, {
       label = spell or "(none)",
       value = a,
@@ -1605,10 +1600,10 @@ local function LayoutCenterPanel(frame, width, height, title, hint)
   frame.qtH = height
   frame.lastLeft = left
   frame.lastBottom = bottom
-  PlaceBox(frame.close, frame, width - 18, height - 16, 14, 14)
+  PlaceBox(frame.close, frame, width - 22, height - 20, 16, 16)
   frame.title:ClearAllPoints()
   frame.title:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 10, height - 16)
-  frame.title:SetPoint("TOPRIGHT", frame, "BOTTOMLEFT", width - 22, height - 4)
+  frame.title:SetPoint("TOPRIGHT", frame, "BOTTOMLEFT", width - 28, height - 4)
   frame.title:SetText(title or "")
   if hint and hint ~= "" then
     frame.hint:ClearAllPoints()
@@ -1666,45 +1661,36 @@ local function EnsureSpellDetails()
   local frame = CreateFrame("Frame", "QtPMeterDetails", UIParent)
   frame:SetFrameStrata("FULLSCREEN")
   frame:SetFrameLevel(180)
-  if frame.SetBackdrop then
-    pcall(frame.SetBackdrop, frame, {
-      bgFile = "Interface\\Buttons\\WHITE8X8",
-      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-      tile = true, tileSize = 8, edgeSize = 12,
-      insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    QtP.PaintPanel(frame)
-  end
+  QtP.PaintPanel(frame)
   frame.title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   frame.title:SetJustifyH("LEFT")
+  QtP.ApplyTitleFont(frame.title)
   frame.hint = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  QtP.ApplyMutedFont(frame.hint)
   frame.sub = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   frame.sub:SetJustifyH("LEFT")
+  QtP.ApplyBodyFont(frame.sub)
   frame.split = frame:CreateTexture(nil, "ARTWORK")
   frame.split:SetTexture("Interface\\Buttons\\WHITE8X8")
-  frame.split:SetVertexColor(.2, .7, .62, .35)
-  frame.close = CreateFrame("Button", nil, frame)
-  frame.close:EnableMouse(true)
-  frame.close:RegisterForClicks("LeftButtonUp")
-  frame.close.text = frame.close:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  frame.close.text:SetPoint("CENTER", frame.close, "CENTER", 0, 0)
-  frame.close.text:SetText("X")
-  frame.close:SetScript("OnClick", HideSpellDetails)
+  do
+    local border = QtUiPlus.media.color.border
+    frame.split:SetVertexColor(border[1], border[2], border[3], 1)
+  end
+  frame.close = QtP.AttachCloseButton(frame, HideSpellDetails)
   frame.compare = CreateFrame("Button", nil, frame)
   frame.compare:EnableMouse(true)
   frame.compare:RegisterForClicks("LeftButtonUp")
-  if frame.compare.SetBackdrop then
-    pcall(frame.compare.SetBackdrop, frame.compare, {
-      bgFile = "Interface\\Buttons\\WHITE8X8",
-      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-      tile = true, tileSize = 8, edgeSize = 8,
-      insets = { left = 1, right = 1, top = 1, bottom = 1 },
-    })
-    QtP.PaintSurface(frame.compare)
-  end
+  QtP.PaintSurface(frame.compare)
   frame.compare.text = frame.compare:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   frame.compare.text:SetPoint("CENTER", frame.compare, "CENTER", 0, 0)
   frame.compare.text:SetText("Compare")
+  QtP.ApplyBodyFont(frame.compare.text)
+  frame.compare:SetScript("OnEnter", function()
+    QtP.PaintHover(this)
+  end)
+  frame.compare:SetScript("OnLeave", function()
+    QtP.PaintSurface(this)
+  end)
   frame.compare:SetScript("OnClick", ToggleCompare)
   frame.roster = {}
   frame.bars = {}
@@ -1845,7 +1831,7 @@ RefreshOverview = function()
         bar:SetStatusBarColor(r, g, b, .95)
         label = "> " .. label
       elseif name == detailCmp then
-        bar:SetStatusBarColor(.72, .42, .18, .95)
+        bar:SetStatusBarColor(.96, .68, .04, .95)
         label = "vs " .. label
       else
         bar:SetStatusBarColor(r * .7, g * .7, b * .7, .75)
@@ -1887,10 +1873,10 @@ RefreshOverview = function()
   frame.sub:SetText(sub)
 
   local rows
-  local tint = { .18, .62, .55 }
+  local tint = { .45, .45, .48 }
   if detailMode == "targets" and detailUnit and detailSpell and rowA then
     rows = TargetRows(detailUnit, detailSpell, rowA)
-    tint = { .72, .42, .18 }
+    tint = { .96, .68, .04 }
   elseif detailCmp and rowA then
     rows = CompareRows(detailUnit, rowA, detailCmp, rowB)
   else
@@ -1988,43 +1974,24 @@ local function EnsureFightPicker()
   local frame = CreateFrame("Frame", "QtPMeterFights", UIParent)
   frame:SetFrameStrata("FULLSCREEN")
   frame:SetFrameLevel(185)
-  if frame.SetBackdrop then
-    pcall(frame.SetBackdrop, frame, {
-      bgFile = "Interface\\Buttons\\WHITE8X8",
-      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-      tile = true, tileSize = 8, edgeSize = 12,
-      insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    QtP.PaintPanel(frame)
-  end
+  QtP.PaintPanel(frame)
   frame.title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   frame.title:SetJustifyH("LEFT")
+  QtP.ApplyTitleFont(frame.title)
   frame.hint = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  frame.close = CreateFrame("Button", nil, frame)
-  frame.close:EnableMouse(true)
-  frame.close:RegisterForClicks("LeftButtonUp")
-  frame.close.text = frame.close:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  frame.close.text:SetPoint("CENTER", frame.close, "CENTER", 0, 0)
-  frame.close.text:SetText("X")
-  frame.close:SetScript("OnClick", HideFightMenu)
+  QtP.ApplyMutedFont(frame.hint)
+  frame.close = QtP.AttachCloseButton(frame, HideFightMenu)
   frame.rows = {}
   local i
   for i = 1, FIGHTS_PER_PAGE do
     local btn = CreateFrame("Button", nil, frame)
     btn:EnableMouse(true)
     btn:RegisterForClicks("LeftButtonUp")
-    if btn.SetBackdrop then
-      pcall(btn.SetBackdrop, btn, {
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 8, edgeSize = 8,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
-      })
-      QtP.PaintSurface(btn)
-    end
+    QtP.PaintSurface(btn)
     btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     btn.text:SetPoint("LEFT", btn, "LEFT", 8, 0)
     btn.text:SetJustifyH("LEFT")
+    QtP.ApplyBodyFont(btn.text)
     btn:SetScript("OnEnter", function()
       QtP.PaintHover(this)
     end)
@@ -2042,6 +2009,7 @@ local function EnsureFightPicker()
   frame.prev.text = frame.prev:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   frame.prev.text:SetPoint("CENTER", frame.prev, "CENTER", 0, 0)
   frame.prev.text:SetText("<")
+  QtP.ApplyBodyFont(frame.prev.text)
   frame.prev:SetScript("OnClick", function()
     if fightPage > 1 then
       fightPage = fightPage - 1
@@ -2054,6 +2022,7 @@ local function EnsureFightPicker()
   frame.next.text = frame.next:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   frame.next.text:SetPoint("CENTER", frame.next, "CENTER", 0, 0)
   frame.next.text:SetText(">")
+  QtP.ApplyBodyFont(frame.next.text)
   frame.next:SetScript("OnClick", function()
     fightPage = fightPage + 1
     if QtP.ShowFightPage then QtP.ShowFightPage() end
@@ -2935,15 +2904,7 @@ local function MakeMeterButton(parent, caption, lines, onClick, icon)
   local btn = CreateFrame("Button", nil, parent)
   btn:EnableMouse(true)
   btn:RegisterForClicks("LeftButtonUp")
-  if btn.SetBackdrop then
-    pcall(btn.SetBackdrop, btn, {
-      bgFile = "Interface\\Buttons\\WHITE8X8",
-      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-      tile = true, tileSize = 8, edgeSize = 8,
-      insets = { left = 1, right = 1, top = 1, bottom = 1 },
-    })
-    QtP.PaintSurface(btn)
-  end
+  QtP.PaintSurface(btn)
   if icon then
     btn.icon = btn:CreateTexture(nil, "ARTWORK")
     btn.icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 3, -3)
@@ -3152,43 +3113,24 @@ local function EnsureModePicker()
   local frame = CreateFrame("Frame", "QtPMeterModes", UIParent)
   frame:SetFrameStrata("FULLSCREEN")
   frame:SetFrameLevel(185)
-  if frame.SetBackdrop then
-    pcall(frame.SetBackdrop, frame, {
-      bgFile = "Interface\\Buttons\\WHITE8X8",
-      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-      tile = true, tileSize = 8, edgeSize = 12,
-      insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    QtP.PaintPanel(frame)
-  end
+  QtP.PaintPanel(frame)
   frame.title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   frame.title:SetJustifyH("LEFT")
+  QtP.ApplyTitleFont(frame.title)
   frame.hint = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  frame.close = CreateFrame("Button", nil, frame)
-  frame.close:EnableMouse(true)
-  frame.close:RegisterForClicks("LeftButtonUp")
-  frame.close.text = frame.close:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  frame.close.text:SetPoint("CENTER", frame.close, "CENTER", 0, 0)
-  frame.close.text:SetText("X")
-  frame.close:SetScript("OnClick", HideModeMenu)
+  QtP.ApplyMutedFont(frame.hint)
+  frame.close = QtP.AttachCloseButton(frame, HideModeMenu)
   frame.rows = {}
   local i
   for i = 1, table.getn(MODES) do
     local btn = CreateFrame("Button", nil, frame)
     btn:EnableMouse(true)
     btn:RegisterForClicks("LeftButtonUp")
-    if btn.SetBackdrop then
-      pcall(btn.SetBackdrop, btn, {
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 8, edgeSize = 8,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
-      })
-      QtP.PaintSurface(btn)
-    end
+    QtP.PaintSurface(btn)
     btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     btn.text:SetPoint("LEFT", btn, "LEFT", 8, 0)
     btn.text:SetJustifyH("LEFT")
+    QtP.ApplyBodyFont(btn.text)
     btn.modeIndex = i
     btn:SetScript("OnEnter", function()
       QtP.PaintHover(this)
@@ -3488,35 +3430,26 @@ function QtP:SetupDamageMeter()
     d:SetFrameLevel(300)
     d:SetPoint("TOPLEFT", UIParent, "CENTER", -140, 50)
     d:SetPoint("BOTTOMRIGHT", UIParent, "CENTER", 140, -40)
-    d:SetBackdrop({
-      bgFile = "Interface\\Buttons\\WHITE8X8",
-      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-      tile = true, tileSize = 8, edgeSize = 12,
-      insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
     QtP.PaintPanel(d)
     d:EnableMouse(true)
     d.title = d:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     d.title:SetPoint("TOPLEFT", d, "TOPLEFT", 14, -12)
-    d.title:SetText("|cff33ffccInstance|r")
+    d.title:SetText("Instance")
+    QtP.ApplyTitleFont(d.title)
     d.body = d:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     d.body:SetPoint("TOPLEFT", d, "TOPLEFT", 14, -34)
     d.body:SetPoint("TOPRIGHT", d, "TOPRIGHT", -14, -34)
     d.body:SetJustifyH("LEFT")
     d.body:SetText("Reset the damage meter for this instance?")
+    QtP.ApplyBodyFont(d.body)
     local yes = CreateFrame("Button", nil, d)
     yes:SetPoint("BOTTOMLEFT", d, "BOTTOMLEFT", 14, 10)
     yes:SetPoint("TOPRIGHT", d, "BOTTOMLEFT", 130, 32)
-    yes:SetBackdrop({
-      bgFile = "Interface\\Buttons\\WHITE8X8",
-      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-      tile = true, tileSize = 8, edgeSize = 8,
-      insets = { left = 1, right = 1, top = 1, bottom = 1 },
-    })
     QtP.PaintHover(yes)
     yes.text = yes:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     yes.text:SetPoint("CENTER", yes, "CENTER", 0, 0)
     yes.text:SetText("Reset")
+    QtP.ApplyBodyFont(yes.text)
     yes:SetScript("OnClick", function()
       ResetSegment(0)
       ResetSegment(1)
@@ -3530,16 +3463,11 @@ function QtP:SetupDamageMeter()
     local no = CreateFrame("Button", nil, d)
     no:SetPoint("BOTTOMLEFT", d, "BOTTOMLEFT", 138, 10)
     no:SetPoint("TOPRIGHT", d, "BOTTOMLEFT", 254, 32)
-    no:SetBackdrop({
-      bgFile = "Interface\\Buttons\\WHITE8X8",
-      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-      tile = true, tileSize = 8, edgeSize = 8,
-      insets = { left = 1, right = 1, top = 1, bottom = 1 },
-    })
     QtP.PaintSurface(no)
     no.text = no:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     no.text:SetPoint("CENTER", no, "CENTER", 0, 0)
     no.text:SetText("Keep")
+    QtP.ApplyBodyFont(no.text)
     no:SetScript("OnClick", function() d:Hide() end)
     QtP.meterResetDialog = d
   end

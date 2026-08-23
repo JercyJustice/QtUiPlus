@@ -191,15 +191,31 @@ end
 -- Panel painting
 --
 -- The ported windows paint their own chrome inline, in a dozen places, with
--- QtUI's blue-grey literals. These helpers put the QtUiPlus palette behind
--- those call sites so the colours live in core/media.lua like every other
--- surface, instead of being duplicated as numbers across a 3500-line file.
+-- QtUI's blue-grey literals and the native UI-Tooltip-Border edge. Colouring
+-- that backdrop is not enough: the stock edge art is what still reads as QtUI.
+-- These helpers route through U.CreateBackdrop so a ported popup gets the same
+-- near-black fill and 1px outline as every other QtUiPlus panel.
 --
 -- Colour arguments are not accepted on purpose: the point is that a ported
 -- window cannot invent a shade that the rest of the UI does not use.
 -- ---------------------------------------------------------------------------
+local function ShowEdges(frame)
+  local edges = frame and frame.qtpEdges
+  if not edges then return end
+  local i
+  for i = 1, table.getn(edges) do
+    pcall(edges[i].Show, edges[i])
+  end
+end
+
 local function Paint(frame, fill, edge)
-  if not frame or not frame.SetBackdropColor then return end
+  if not frame then return end
+  if type(U.CreateBackdrop) == "function" then
+    U.CreateBackdrop(frame, { background = fill, border = edge })
+    ShowEdges(frame)
+    return
+  end
+  if not frame.SetBackdropColor then return end
   pcall(frame.SetBackdropColor, frame, M.Unpack(fill))
   if frame.SetBackdropBorderColor then
     pcall(frame.SetBackdropBorderColor, frame, M.Unpack(edge))
@@ -225,11 +241,50 @@ end
 
 -- Fully transparent, for the "hide meter background" option.
 function QtP.PaintClear(frame)
+  if type(U.SetBackdropShown) == "function" then
+    U.SetBackdropShown(frame, false)
+    return
+  end
   if not frame or not frame.SetBackdropColor then return end
   pcall(frame.SetBackdropColor, frame, 0, 0, 0, 0)
   if frame.SetBackdropBorderColor then
     pcall(frame.SetBackdropBorderColor, frame, 0, 0, 0, 0)
   end
+end
+
+-- Shared close glyph used by bags/bank, so ported popups do not keep QtUI's
+-- gold "X" caption.
+function QtP.AttachCloseButton(parent, onClick)
+  if type(U.CreateCloseButton) == "function" then
+    return U.CreateCloseButton(parent, { size = 16, onClick = onClick })
+  end
+  local button = CreateFrame("Button", nil, parent)
+  button:SetWidth(16)
+  button:SetHeight(16)
+  pcall(button.EnableMouse, button, true)
+  pcall(button.RegisterForClicks, button, "LeftButtonUp")
+  button.text = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  button.text:SetPoint("CENTER", button, "CENTER", 0, 0)
+  button.text:SetText("X")
+  if type(onClick) == "function" then
+    button:SetScript("OnClick", onClick)
+  end
+  return button
+end
+
+function QtP.ApplyTitleFont(fontString)
+  local c = M.color.textAccent
+  QtP:ApplyFont(fontString, 12, c[1], c[2], c[3])
+end
+
+function QtP.ApplyBodyFont(fontString)
+  local c = M.color.text
+  QtP:ApplyFont(fontString, 11, c[1], c[2], c[3])
+end
+
+function QtP.ApplyMutedFont(fontString)
+  local c = M.color.textDim
+  QtP:ApplyFont(fontString, 10, c[1], c[2], c[3])
 end
 
 -- QtUI's MoveMode called QtUI:RegisterMovable to enrol a window in edit mode.
