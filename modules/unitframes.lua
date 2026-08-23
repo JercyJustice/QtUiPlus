@@ -1307,6 +1307,13 @@ local COLOR_DEFAULTS = {
   healthColorR = M.color.healthFull[1],
   healthColorG = M.color.healthFull[2],
   healthColorB = M.color.healthFull[3],
+
+  -- Colour a health bar by who the unit is rather than by one flat colour.
+  -- Both default off so the shipped look is unchanged until asked for.
+  -- classColorPlayers covers the player and party frames; reactionColors
+  -- covers everything the player does not control.
+  classColorPlayers = false,
+  reactionColors    = false,
 }
 
 do
@@ -1319,6 +1326,14 @@ do
     COLOR_DEFAULTS[entry.key .. "G"] = default[2]
     COLOR_DEFAULTS[entry.key .. "B"] = default[3]
   end
+end
+
+-- Target-of-target is the one frame players most often want gone; QtUI had a
+-- toggle for it and this is the equivalent. Reads through ModuleConfig rather
+-- than caching, so the next refresh after a settings change already sees it.
+local function ShowTargetTarget()
+  local cfg = U.ModuleConfig("unitframes", { showTargetTarget = true })
+  return cfg.showTargetTarget ~= false
 end
 
 local function ColorConfig()
@@ -1358,12 +1373,34 @@ local function PowerBarColor(powerType)
   return M.Unpack(M.power[powerType] or M.power.fallback)
 end
 
+-- The colour a health bar starts from, before the gradient is applied.
+--
+-- Precedence, highest first: class colour for a player unit, then reaction
+-- colour for anything else, then the flat base colour. Both of the first two
+-- are opt-in, so with neither enabled this returns exactly what it always did.
+local function HealthColorFor(frame)
+  local cfg = ColorConfig()
+  local data = frame.data
+
+  if cfg.classColorPlayers and data.isPlayer and data.class then
+    local r, g, b = M.ClassColor(data.class)
+    if r then return r, g, b end
+  end
+
+  if cfg.reactionColors and not data.isPlayer and data.reaction then
+    local r, g, b = M.ReactionColor(data.reaction)
+    if r then return r, g, b end
+  end
+
+  return HealthBaseColor()
+end
+
 -- A checked custom colour always wins over the health gradient. With it off,
 -- keep the default full-health colour and fade into the pastel gradient.
 local function ApplyHealthColor(frame)
   local perc = frame.data.healthPercent
   local cfg = ColorConfig()
-  local cr, cg, cb = HealthBaseColor()
+  local cr, cg, cb = HealthColorFor(frame)
 
   local r, g, b
   if cfg.customColors or perc >= 1 then
@@ -1534,6 +1571,14 @@ end
 local function RefreshFrame(frame, mode)
   statFrameRefreshes = statFrameRefreshes + 1
   if mode == "full" then statFullRefreshes = statFullRefreshes + 1 end
+
+  -- Turned off entirely: hide and stop, without the unlocked-shell fallback
+  -- below. A frame the player has switched off should not reappear in edit
+  -- mode offering a handle for something that will never be shown.
+  if frame.spec and frame.spec.id == "targettarget" and not ShowTargetTarget() then
+    SetFrameShown(frame, false)
+    return
+  end
 
   local exists = ApiTruth("UnitExists", frame.unit)
 
@@ -2195,6 +2240,44 @@ local function BuildUnitFrameColorSettings(parent, y)
   customToggle.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, y - 26)
   table.insert(widgets, customToggle)
 
+  local classToggle = U.CreateCheckbox(parent, {
+    name = "QtUiPlusSettingsClassColors",
+    text = "Class colour player health bars",
+    value = ColorConfig().classColorPlayers,
+    onChange = function(value)
+      ColorConfig().classColorPlayers = value
+      U.ApplyUnitFrameColors()
+    end,
+  })
+  classToggle.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, y - 50)
+  table.insert(widgets, classToggle)
+
+  local totToggle = U.CreateCheckbox(parent, {
+    name = "QtUiPlusSettingsShowTargetTarget",
+    text = "Show target of target frame",
+    value = ShowTargetTarget(),
+    onChange = function(value)
+      U.ModuleConfig("unitframes", { showTargetTarget = true }).showTargetTarget =
+        value and true or false
+      local tot = frames and frames.targettarget
+      if tot then RefreshFrame(tot, "full") end
+    end,
+  })
+  totToggle.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, y - 74)
+  table.insert(widgets, totToggle)
+
+  local reactionToggle = U.CreateCheckbox(parent, {
+    name = "QtUiPlusSettingsReactionColors",
+    text = "Reaction colour NPC health bars",
+    value = ColorConfig().reactionColors,
+    onChange = function(value)
+      ColorConfig().reactionColors = value
+      U.ApplyUnitFrameColors()
+    end,
+  })
+  reactionToggle.SetPoint("TOPLEFT", parent, "TOPLEFT", 260, y - 50)
+  table.insert(widgets, reactionToggle)
+
   local healthPicker = U.CreateColorPicker(parent, {
     name = "QtUiPlusSettingsHealthColor",
     text = "Health bar color",
@@ -2260,6 +2343,9 @@ local function BuildUnitFrameColorSettings(parent, y)
     local cfg = ColorConfig()
     healthPicker.SetValue(ColorValue("healthColor"))
     customToggle.SetValue(cfg.customColors)
+    classToggle.SetValue(cfg.classColorPlayers)
+    totToggle.SetValue(ShowTargetTarget())
+    reactionToggle.SetValue(cfg.reactionColors)
 
     local n
     for n = 1, table.getn(POWER_TYPES) do

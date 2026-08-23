@@ -21,6 +21,7 @@
 -- module table at one level of nesting and would flatten them on load.
 
 local U = QtUiPlus
+local M = U.media
 
 local P = U.RegisterModule("profiles")
 
@@ -196,6 +197,149 @@ function QtP.DeleteProfile(name)
   if not store[name] then return false, "no profile named " .. name end
   store[name] = nil
   return true, name
+end
+
+-- ---------------------------------------------------------------------------
+-- Settings page
+--
+-- Rows are a fixed pool populated on every open, not built per profile: the
+-- build function runs once and only the refresh runs again, so the row count
+-- has to be decided up front.
+--
+-- There is no text-input widget in core/widgets.lua, so saving from this page
+-- auto-names the profile ("Profile 1", "Profile 2", ...). A chosen name is
+-- still available through |cffffff00/qtp profile save <name>|r.
+-- ---------------------------------------------------------------------------
+local PAGE_ROWS = 6
+
+local function NextAutoName()
+  local existing = {}
+  local names = QtP.ProfileNames()
+  local i
+  for i = 1, table.getn(names) do existing[names[i]] = true end
+
+  local n = 1
+  while existing["Profile " .. n] do n = n + 1 end
+  return "Profile " .. n
+end
+
+local function BuildSettingsPage(parent)
+  local widgets, rows = {}, {}
+
+  local header = U.CreateSectionHeader(parent, {
+    text = "Profiles", width = 484, y = -4,
+  })
+  table.insert(widgets, header)
+
+  local Refresh
+
+  local save = U.CreateButton(parent, {
+    name = "QtUiPlusProfilesSave",
+    text = "Save current layout as a new profile",
+    width = 300,
+    height = 26,
+    onClick = function()
+      local ok, result = QtP.SaveProfile(NextAutoName())
+      if ok then
+        U.Print("saved profile |cffffff00" .. result .. "|r")
+      else
+        U.Print("could not save: " .. tostring(result))
+      end
+      if Refresh then Refresh() end
+    end,
+  })
+  save:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -34)
+  table.insert(widgets, save)
+
+  local i
+  for i = 1, PAGE_ROWS do
+    local row = {}
+    local y = -74 - (i - 1) * 30
+
+    row.label = U.CreateSettingsLabel(parent, {
+      size = M.fontSize.normal, color = M.color.text,
+      inherits = "GameFontNormal", justify = "LEFT",
+    })
+    if row.label then
+      row.label:SetPoint("TOPLEFT", parent, "TOPLEFT", 4, y - 6)
+      table.insert(widgets, row.label)
+    end
+
+    row.load = U.CreateButton(parent, {
+      name = "QtUiPlusProfilesLoad" .. i,
+      text = "Load",
+      width = 80, height = 22,
+      onClick = function()
+        if not row.name then return end
+        local ok, result = QtP.LoadProfile(row.name)
+        if ok then
+          U.Print("loaded profile |cffffff00" .. result ..
+                  "|r - |cffffff00/reload|r to apply it everywhere")
+        else
+          U.Print("could not load: " .. tostring(result))
+        end
+      end,
+    })
+    row.load:SetPoint("TOPLEFT", parent, "TOPLEFT", 200, y)
+    table.insert(widgets, row.load)
+
+    row.delete = U.CreateButton(parent, {
+      name = "QtUiPlusProfilesDelete" .. i,
+      text = "Delete",
+      width = 80, height = 22,
+      onClick = function()
+        if not row.name then return end
+        local ok, result = QtP.DeleteProfile(row.name)
+        if ok then U.Print("deleted profile |cffffff00" .. result .. "|r") end
+        if Refresh then Refresh() end
+      end,
+    })
+    row.delete:SetPoint("TOPLEFT", parent, "TOPLEFT", 290, y)
+    table.insert(widgets, row.delete)
+
+    rows[i] = row
+  end
+
+  local hint = U.CreateSettingsLabel(parent, {
+    size = M.fontSize.small, color = M.color.textDim,
+    inherits = "GameFontNormalSmall", justify = "LEFT",
+  })
+  if hint then
+    hint:SetPoint("TOPLEFT", parent, "TOPLEFT", 4, -74 - PAGE_ROWS * 30 - 10)
+    hint:SetText("A profile stores frame positions, module toggles and the " ..
+                 "extras settings, and rescales positions saved at another " ..
+                 "resolution. |cffffff00/qtp profile save <name>|r names one.")
+    table.insert(widgets, hint)
+  end
+
+  Refresh = function()
+    local names = QtP.ProfileNames()
+    local j
+    for j = 1, PAGE_ROWS do
+      local row = rows[j]
+      row.name = names[j]
+      if row.name then
+        if row.label then
+          row.label:SetText(row.name)
+          row.label:Show()
+        end
+        row.load:Show()
+        row.delete:Show()
+      else
+        if row.label then row.label:Hide() end
+        row.load:Hide()
+        row.delete:Hide()
+      end
+    end
+  end
+
+  return widgets, Refresh
+end
+
+function P:OnInit()
+  if type(U.RegisterSettingsTab) == "function" then
+    U.RegisterSettingsTab("profiles", "Profiles", BuildSettingsPage)
+  end
 end
 
 function P:OnEnable()
