@@ -60,14 +60,46 @@ local CARD_H = 44
 local NAME_W = CARD_W - PAD - ICON - NAME_GAP
                        - (BTN * 3 + BTN_GAP * 2) - NAME_GAP - PAD
 
-local function Quality(frame)
+-- Gap between stacked rolls.
+local STACK_GAP = 6
+
+-- The client decides where a roll frame opens, and on this client that lands it
+-- in the middle of the screen where the nameplates are -- which is why the
+-- target plate kept covering the card no matter how high the strata went. The
+-- cards hang off an invisible mover instead, so the window is placed in Anchor
+-- Mode like every other QtUiPlus element and can be parked clear of the plates.
+local anchor
+
+local function BuildAnchor()
+  if anchor then return anchor end
+  local frame = CreateFrame("Frame", "QtUiPlusLootRollAnchor", UIParent)
+  frame:SetWidth(CARD_W)
+  frame:SetHeight(CARD_H)
+  pcall(frame.EnableMouse, frame, false)
+  if type(U.RegisterMover) == "function" then
+    U.RegisterMover("lootroll.anchor", frame, {
+      label = "Loot Roll",
+      default = {
+        point = "TOP",
+        relativePoint = "TOP",
+        x = 0,
+        y = -180,
+      },
+    })
+  end
+  anchor = frame
+  return frame
+end
+
+-- Returns quality and item name, both from the one documented call.
+local function RollItem(frame)
   local rollID = frame and frame.rollID
-  if not rollID then return nil end
+  if not rollID then return nil, nil end
   local info = U.G("GetLootRollItemInfo")
-  if type(info) ~= "function" then return nil end
-  local ok, _, _, _, quality = pcall(info, rollID)
-  if not ok then return nil end
-  return tonumber(quality)
+  if type(info) ~= "function" then return nil, nil end
+  local ok, _, itemName, _, quality = pcall(info, rollID)
+  if not ok then return nil, nil end
+  return tonumber(quality), itemName
 end
 
 local function StyleIcon(name, quality)
@@ -102,9 +134,26 @@ local function StyleButtons(name, frame)
     if button then
       pcall(button.SetWidth, button, BTN)
       pcall(button.SetHeight, button, BTN)
-      -- The dice / coin / pass glyphs ARE this button's stock normal texture,
-      -- so the art is deliberately left alone -- it is the only thing telling
-      -- one roll button from another. Only a flat plate is added behind it.
+      -- The dice / coin / pass glyphs ARE this button's stock textures, so the
+      -- art is kept -- it is the only thing telling one roll button from
+      -- another. It does have to be pinned to the button, though:
+      -- USER_CONFIRMED_INGAME the stock art keeps its own larger size when the
+      -- button is resized, so the dice spilled across the coin beside it.
+      local faces = { "GetNormalTexture", "GetPushedTexture",
+                      "GetHighlightTexture", "GetDisabledTexture" }
+      local f
+      for f = 1, table.getn(faces) do
+        local getter = button[faces[f]]
+        if type(getter) == "function" then
+          local okFace, texture = pcall(getter, button)
+          if okFace and texture then
+            pcall(function()
+              texture:ClearAllPoints()
+              texture:SetAllPoints(button)
+            end)
+          end
+        end
+      end
       U.CreateBackdrop(button, {
         background = M.color.backgroundRaised,
         border = M.color.border,
@@ -166,28 +215,47 @@ end
 
 -- USER_CONFIRMED_INGAME: the item name draws twice -- once in $parentName (the
 -- one styled below, confirmed by its quality colour landing on it) and once in
--- a second FontString this frame carries, which sat in white above the card.
--- U.StripStockTextures only takes Textures, so that one survived it. The label
--- being styled is kept and every other FontString on the frame is faded out;
--- alpha rather than Hide, since the client re-shows its own regions when the
--- frame is reused for the next roll.
-local function HideExtraLabels(frame, keep)
-  if not frame or not frame.GetRegions then return end
-  local ok, regions = pcall(function() return { frame:GetRegions() } end)
+-- white above the card. U.StripStockTextures only takes Textures, so the second
+-- label survived it, and fading every other FontString on the frame did not
+-- reach it either -- it is not one of the frame's own regions.
+--
+-- So the duplicate is matched on what it says rather than on where it lives:
+-- any FontString on the frame or one level into its children whose text is the
+-- item name, and which is not the label being styled, is the duplicate. Nothing
+-- else on this card carries the item name, so a stack count or a timer readout
+-- cannot be caught by mistake. Alpha rather than Hide, since the client
+-- re-shows its own regions when the frame is reused for the next roll.
+local function FadeMatchingLabels(owner, keep, text)
+  if not owner or not owner.GetRegions or type(text) ~= "string" then return end
+  local ok, regions = pcall(function() return { owner:GetRegions() } end)
   if not ok or type(regions) ~= "table" then return end
   local i
   for i = 1, table.getn(regions) do
     local region = regions[i]
-    if region and region ~= keep and region.GetObjectType then
+    if region and region ~= keep and region.GetObjectType and region.GetText then
       local typeOk, objectType = pcall(region.GetObjectType, region)
-      if typeOk and objectType == "FontString" and region.SetAlpha then
-        pcall(region.SetAlpha, region, 0)
+      if typeOk and objectType == "FontString" then
+        local textOk, value = pcall(region.GetText, region)
+        if textOk and value == text and region.SetAlpha then
+          pcall(region.SetAlpha, region, 0)
+        end
       end
     end
   end
 end
 
-local function Skin(name)
+local function HideDuplicateName(frame, keep, text)
+  FadeMatchingLabels(frame, keep, text)
+  if not frame.GetChildren then return end
+  local ok, children = pcall(function() return { frame:GetChildren() } end)
+  if not ok or type(children) ~= "table" then return end
+  local i
+  for i = 1, table.getn(children) do
+    FadeMatchingLabels(children[i], keep, text)
+  end
+end
+
+local function Skin(name, index)
   local frame = U.G(name)
   if not frame then return end
 
@@ -209,12 +277,21 @@ local function Skin(name)
   -- top, which is the one thing that should be able to cover a roll.
   U.RaiseGamePanel(frame, "FULLSCREEN_DIALOG")
 
-  local quality = Quality(frame)
+  -- Stacked down from the mover, one slot per frame index.
+  local host = BuildAnchor()
+  if host and index then
+    pcall(function()
+      frame:ClearAllPoints()
+      frame:SetPoint("TOP", host, "TOP", 0, -(index - 1) * (CARD_H + STACK_GAP))
+    end)
+  end
+
+  local quality, itemName = RollItem(frame)
   local icon = StyleIcon(name, quality)
   local leftmost = StyleButtons(name, frame)
   StyleName(name, frame, icon, leftmost, quality)
   StyleTimer(name, frame)
-  HideExtraLabels(frame, U.G(name .. "Name"))
+  HideDuplicateName(frame, U.G(name .. "Name"), itemName)
 end
 
 local function Attach()
@@ -229,17 +306,18 @@ local function Attach()
         -- Every roll reuses these four frames with new content, so the skin is
         -- re-applied per show rather than once: the item, and with it the
         -- quality colour, is different each time.
-        if U.PostHookScript(frame, "OnShow", function() Skin(name) end) then
+        if U.PostHookScript(frame, "OnShow", function() Skin(name, i) end) then
           frame.qtpLootRollHooked = true
         end
       end
-      Skin(name)
+      Skin(name, i)
     end
   end
   return attached
 end
 
 function LR:OnEnable()
+  BuildAnchor()
   if Attach() then return end
 
   U.RegisterEvent("ADDON_LOADED", Attach)
