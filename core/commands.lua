@@ -954,6 +954,14 @@ function rollDump.Describe(object, label)
            "/" .. tostring(rollDump.Try(object, "GetFrameLevel") or "?")
   end
 
+  -- Who owns it. For the bar that keeps appearing over the card, this one
+  -- field is the whole answer.
+  local parent = rollDump.Try(object, "GetParent")
+  if parent then
+    line = line .. " parent=" ..
+           tostring(rollDump.Try(parent, "GetName") or "<unnamed>")
+  end
+
   return line
 end
 
@@ -1017,19 +1025,45 @@ function U.LootRollDump()
   end
 
   -- The bar sits over the card, so whatever owns it may not be under the roll
-  -- frame at all. UIParent's own children are listed too, shown ones only, so
-  -- a frame parked on top of the card appears here even when it is a stranger.
-  table.insert(lines, "--- shown UIParent children ---")
-  local okU, kids = pcall(function() return { UIParent:GetChildren() } end)
-  if okU and type(kids) == "table" then
+  -- frame at all. Both roots are walked, shown children only: UIParent for the
+  -- interface, WorldFrame because nameplates hang there and a plate is one of
+  -- the candidates. A bar with a health readout is anchored somewhere in one of
+  -- these two trees whether or not a roll is on screen -- which is the point:
+  -- a loot roll needs a group and cannot be produced on demand, while a target
+  -- can, so this dump is worth taking with nothing but a target selected.
+  local function WalkRoot(root, rootName, label)
+    table.insert(lines, "--- shown " .. rootName .. " children ---")
+    if not root then
+      table.insert(lines, "  " .. rootName .. " unavailable")
+      return
+    end
+    local ok, kids = pcall(function() return { root:GetChildren() } end)
+    if not ok or type(kids) ~= "table" then
+      table.insert(lines, "  " .. rootName .. " has no readable children")
+      return
+    end
     local k
     for k = 1, table.getn(kids) do
       local kid = kids[k]
       if kid and rollDump.Try(kid, "IsShown") then
-        Add(kid, "  top")
+        Add(kid, label)
+        -- One level in: the health bar of a plate or a unit frame is a child
+        -- of that frame, not the root.
+        local okG, grand = pcall(function() return { kid:GetChildren() } end)
+        if okG and type(grand) == "table" then
+          local g
+          for g = 1, table.getn(grand) do
+            if grand[g] and rollDump.Try(grand[g], "IsShown") then
+              Add(grand[g], label .. "  ")
+            end
+          end
+        end
       end
     end
   end
+
+  WalkRoot(UIParent, "UIParent", "  top")
+  WalkRoot(U.G("WorldFrame"), "WorldFrame", "  world")
 
   return lines
 end
