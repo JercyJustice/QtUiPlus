@@ -96,7 +96,7 @@ local function ShowHelp()
   U.Print("  |cffffff00/qtp check|r - runtime self-check")
   U.Print("  |cffffff00/qtp elite|r - cycle the classification icon test")
   U.Print("  |cffffff00/qtp np|r - dump WorldFrame children (nameplates)")
-  U.Print("  |cffffff00/qtp roll|r - dump the group loot roll window")
+  U.Print("  |cffffff00/qtp roll|r - dump the roll window to QtUiPlusDiagDB")
   U.Print("  |cffffff00/qtp aura|r - dump the aura rows and why a timer is missing")
   U.Print("  |cffffff00/qtp res|r - dump the Character sheet resistance frames")
   U.Print("  |cffffff00/qtp movertest|r - foundation mover smoke test")
@@ -954,10 +954,18 @@ function rollDump.Describe(object, label)
            "/" .. tostring(rollDump.Try(object, "GetFrameLevel") or "?")
   end
 
-  U.Print(line)
+  return line
 end
 
+-- The dump is a written record, not chat output: it runs to dozens of lines,
+-- which is exactly the flood SaveDiagnostic exists for. Chat gets one line.
 local function ShowLootRollDump()
+  local lines = {}
+  local function Add(object, label)
+    if not object then return end
+    table.insert(lines, rollDump.Describe(object, label))
+  end
+
   local i
   for i = 1, 4 do
     local name = "GroupLootFrame" .. i
@@ -965,27 +973,28 @@ local function ShowLootRollDump()
     if frame then
       local shown = rollDump.Try(frame, "IsShown")
       if shown or i == 1 then
-        U.Print("--- " .. name .. " ---")
-        rollDump.Describe(frame, "frame")
+        table.insert(lines, "--- " .. name ..
+                     (shown and " (shown)" or " (hidden)") .. " ---")
+        Add(frame, "frame")
 
         local ok, children = pcall(function() return { frame:GetChildren() } end)
         if ok and type(children) == "table" then
           local c
           for c = 1, table.getn(children) do
-            rollDump.Describe(children[c], "  child")
+            Add(children[c], "  child")
             -- One level deeper: the bar could belong to a child, not the frame.
             local okG, grand = pcall(function() return { children[c]:GetChildren() } end)
             if okG and type(grand) == "table" then
               local g
               for g = 1, table.getn(grand) do
-                rollDump.Describe(grand[g], "    sub")
+                Add(grand[g], "    sub")
               end
             end
             local okR, kidRegions = pcall(function() return { children[c]:GetRegions() } end)
             if okR and type(kidRegions) == "table" then
               local r
               for r = 1, table.getn(kidRegions) do
-                rollDump.Describe(kidRegions[r], "    region")
+                Add(kidRegions[r], "    region")
               end
             end
           end
@@ -995,13 +1004,31 @@ local function ShowLootRollDump()
         if okR and type(regions) == "table" then
           local r
           for r = 1, table.getn(regions) do
-            rollDump.Describe(regions[r], "  region")
+            Add(regions[r], "  region")
           end
         end
       end
     end
   end
-  U.Print("roll: dump complete")
+
+  -- The bar sits over the card, so whatever owns it may not be under the roll
+  -- frame at all. UIParent's own children are listed too, shown ones only, so
+  -- a frame parked on top of the card appears here even when it is a stranger.
+  table.insert(lines, "--- shown UIParent children ---")
+  local okU, kids = pcall(function() return { UIParent:GetChildren() } end)
+  if okU and type(kids) == "table" then
+    local k
+    for k = 1, table.getn(kids) do
+      local kid = kids[k]
+      if kid and rollDump.Try(kid, "IsShown") then
+        Add(kid, "  top")
+      end
+    end
+  end
+
+  SaveDiagnostic("roll", lines)
+  U.Print("roll: " .. table.getn(lines) .. " lines saved to QtUiPlusDiagDB.roll" ..
+          " - |cffffff00/reload|r to write them out")
 end
 
 handlers["roll"] = function() ShowLootRollDump() end
