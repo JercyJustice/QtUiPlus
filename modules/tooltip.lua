@@ -398,12 +398,54 @@ end
 -- ---------------------------------------------------------------------------
 -- Tooltip anchor
 --
--- A dummy frame in edit mode. World / default-anchor tooltips (the ones that
--- normally sit in the bottom-right corner) are pointed at it. Item and action
--- tooltips that SetOwner a specific button stay on that button.
+-- Two kinds of tooltip:
+--
+--   * World / unit tooltips that go through GameTooltip_SetDefaultAnchor with
+--     UIParent or WorldFrame sit on the dummy mover (the "Tooltip" handle in
+--     Anchor Mode).
+--   * Item tooltips (quest log rewards, bags, paperdoll, loot, vendor, mail,
+--     auction, trade, craft) follow the cursor. Wiki SetOwner ANCHOR_CURSOR:
+--     "Clears points and follows the cursor (plus offsets)."
+--     https://emberveil.org/wiki/lua/widgets/GameTooltip#setowner
+--
+-- SetOwner always clears lines, so cursor ownership is applied in
+-- SetDefaultAnchor (before the fill) and again at the start of each item
+-- Set* method, never after the tooltip is populated. Action-bar, aura, and
+-- unit-frame tooltips keep the SetOwner their own modules already chose
+-- (ANCHOR_RIGHT etc.); those setters are not in the item list below.
+--
+-- PlaceAtAnchor uses ClearAllPoints/SetPoint, which cancels engine cursor
+-- tracking. OnShow must not re-pin a tooltip whose GetAnchorType is
+-- ANCHOR_CURSOR (wiki GetAnchorType).
 -- ---------------------------------------------------------------------------
 local ANCHOR_W, ANCHOR_H = 180, 72
 local tooltipAnchor
+
+-- Item fills that should follow the mouse. Compare setters
+-- (SetMerchantCompareItem / SetAuctionCompareItem) stay on ShoppingTooltip
+-- and are not listed. Spellbook / action / talent / aura fills stay on the
+-- button that owned them.
+local CURSOR_SETTERS = {
+  "SetAuctionItem",
+  "SetAuctionSellItem",
+  "SetBagItem",
+  "SetBuybackItem",
+  "SetCraftItem",
+  "SetHyperlink",
+  "SetInboxItem",
+  "SetInventoryItem",
+  "SetLootItem",
+  "SetLootRollItem",
+  "SetMerchantItem",
+  "SetQuestItem",
+  "SetQuestLogItem",
+  "SetQuestLogRewardSpell",
+  "SetQuestRewardSpell",
+  "SetSendMailItem",
+  "SetTradePlayerItem",
+  "SetTradeSkillItem",
+  "SetTradeTargetItem",
+}
 
 local function PlaceAtAnchor(tooltip)
   if not tooltip or not tooltipAnchor then return end
@@ -413,11 +455,49 @@ local function PlaceAtAnchor(tooltip)
   end)
 end
 
-local function IsCornerTooltip(tooltip)
-  if not tooltip or not tooltip.GetOwner then return true end
+local function AnchorType(tooltip)
+  if not tooltip or not tooltip.GetAnchorType then return nil end
+  local ok, value = pcall(tooltip.GetAnchorType, tooltip)
+  if ok and type(value) == "string" then return value end
+  return nil
+end
+
+local function TooltipOwner(tooltip)
+  if not tooltip or not tooltip.GetOwner then return nil end
   local ok, owner = pcall(tooltip.GetOwner, tooltip)
-  if not ok or not owner then return true end
+  if ok then return owner end
+  return nil
+end
+
+local function IsCornerTooltip(tooltip)
+  local owner = TooltipOwner(tooltip)
+  if not owner then return true end
   return owner == UIParent or owner == U.G("WorldFrame")
+end
+
+-- Wiki: SetOwner clears lines and stores the anchor. Safe only before a fill.
+local function FollowCursor(tooltip, owner)
+  if not tooltip or not tooltip.SetOwner then return end
+  local kind = AnchorType(tooltip)
+  if kind == "ANCHOR_CURSOR" or kind == "ANCHOR_PRESERVE" then return end
+  owner = owner or TooltipOwner(tooltip) or UIParent
+  pcall(tooltip.SetOwner, tooltip, owner, "ANCHOR_CURSOR")
+end
+
+local function HookCursorSetters(tooltip)
+  if not tooltip then return end
+  local i
+  for i = 1, table.getn(CURSOR_SETTERS) do
+    local name = CURSOR_SETTERS[i]
+    local original = tooltip[name]
+    if original ~= nil then
+      tooltip[name] = function(self, a, b, c, d)
+        FollowCursor(self)
+        local ok, r1, r2, r3 = pcall(original, self, a, b, c, d)
+        if ok then return r1, r2, r3 end
+      end
+    end
+  end
 end
 
 local function BuildTooltipAnchor()
@@ -457,17 +537,27 @@ function TT.OnEnable()
 
   BuildTooltipAnchor()
 
-  -- Vanilla world-unit tooltips go through this global. Original places them
-  -- in the bottom-right corner; we re-point at the dummy afterwards.
+  local tooltip = U.G("GameTooltip")
+  HookCursorSetters(tooltip)
+
+  -- Vanilla world-unit tooltips go through this global with UIParent or
+  -- WorldFrame. Item buttons pass themselves as parent; those follow the
+  -- cursor instead of the dummy. Wiki SetOwner / GetAnchorType as above.
   if type(U.PostHookGlobal) == "function" then
-    U.PostHookGlobal("GameTooltip_SetDefaultAnchor", function(tooltip, parent)
-      PlaceAtAnchor(tooltip)
+    U.PostHookGlobal("GameTooltip_SetDefaultAnchor", function(tip, parent)
+      if not tip then return end
+      if parent and parent ~= UIParent and parent ~= U.G("WorldFrame") then
+        FollowCursor(tip, parent)
+        return
+      end
+      PlaceAtAnchor(tip)
     end)
   end
 
-  local tooltip = U.G("GameTooltip")
   if tooltip then
     U.PostHookScript(tooltip, "OnShow", function()
+      local kind = AnchorType(tooltip)
+      if kind == "ANCHOR_CURSOR" or kind == "ANCHOR_PRESERVE" then return end
       if IsCornerTooltip(tooltip) then PlaceAtAnchor(tooltip) end
     end)
   end
