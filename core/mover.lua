@@ -20,7 +20,22 @@ local unlocked = false
 -- Edit-mode grid. Sized in UIParent units, which is the only space layout may
 -- be driven from (frames.json context: GetScreenWidth and UIParent:GetWidth are
 -- not the same unit space on this client).
+-- Shipped grid pitch, and the default for the setting below. QtUI called this
+-- "snap range"; here it is the spacing of the grid a dropped frame lands on,
+-- which is the same knob in a grid-based mover.
 local GRID_SIZE = 20
+local GRID_LIMITS = { min = 2, max = 40, step = 1 }
+
+-- Read through a function rather than the constant so the setting takes effect
+-- on the next drop. The grid ARTWORK is built once, so changing this rebuilds
+-- it -- see U.SetGridSize.
+local function GridPitch()
+  local cfg = U.ModuleConfig("mover", { gridSize = GRID_SIZE })
+  local value = U.Round(tonumber(cfg.gridSize) or GRID_SIZE)
+  if value < GRID_LIMITS.min then value = GRID_LIMITS.min end
+  if value > GRID_LIMITS.max then value = GRID_LIMITS.max end
+  return value
+end
 
 -- ---------------------------------------------------------------------------
 -- Position handling
@@ -77,7 +92,8 @@ end
 
 local function SnapValue(value)
   value = tonumber(value) or 0
-  return math.floor(value / GRID_SIZE + 0.5) * GRID_SIZE
+  local pitch = GridPitch()
+  return math.floor(value / pitch + 0.5) * pitch
 end
 
 local function ApplyPendingSnap()
@@ -336,18 +352,20 @@ local function CreateGrid()
   CreateGridLine(true, 0, M.color.gridAxis, height, thickness)
   CreateGridLine(false, 0, M.color.gridAxis, width, thickness)
 
-  offset = GRID_SIZE
+  local pitch = GridPitch()
+
+  offset = pitch
   while offset < width / 2 do
     CreateGridLine(true, offset, M.color.grid, height, thickness)
     CreateGridLine(true, -offset, M.color.grid, height, thickness)
-    offset = offset + GRID_SIZE
+    offset = offset + pitch
   end
 
-  offset = GRID_SIZE
+  offset = pitch
   while offset < height / 2 do
     CreateGridLine(false, offset, M.color.grid, width, thickness)
     CreateGridLine(false, -offset, M.color.grid, width, thickness)
-    offset = offset + GRID_SIZE
+    offset = offset + pitch
   end
 
   grid:Hide()
@@ -447,7 +465,33 @@ local function HideEditOverlay()
 end
 
 function U.GridSize()
-  return GRID_SIZE
+  return GridPitch()
+end
+
+function U.GridSizeLimits()
+  return GRID_LIMITS.min, GRID_LIMITS.max, GRID_LIMITS.step
+end
+
+-- Changing the pitch has to rebuild the grid artwork: the lines are created
+-- once, at a fixed spacing, so a new pitch would otherwise snap frames onto a
+-- grid that does not match the one being drawn.
+function U.SetGridSize(value)
+  local cfg = U.ModuleConfig("mover", { gridSize = GRID_SIZE })
+  cfg.gridSize = U.Round(tonumber(value) or GRID_SIZE)
+
+  if grid then
+    -- The old grid frame is discarded rather than re-spaced: its lines are
+    -- child regions created at a fixed offset each, and this client gives no
+    -- way to destroy them individually. Hiding the old frame and building a
+    -- fresh one is the only correct rebuild.
+    local wasShown = grid:IsShown()
+    pcall(grid.Hide, grid)
+    grid = nil
+    CreateGrid()
+    if wasShown and grid then pcall(grid.Show, grid) end
+  end
+
+  return GridPitch()
 end
 
 -- ---------------------------------------------------------------------------

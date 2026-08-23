@@ -694,7 +694,23 @@ local function BuildGeneralPage(parent)
   minimapButton.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -292)
   table.insert(widgets, minimapButton)
 
+  -- Grid pitch for edit mode (core/mover.lua). Lives here rather than on a
+  -- page of its own: it is one slider, and it belongs beside the Move UI button
+  -- that opens the mode it affects.
+  local gridMin, gridMax, gridStep = U.GridSizeLimits()
+  local gridSlider = U.CreateSlider(parent, {
+    name = "QtUiPlusSettingsGridSize",
+    text = "Edit Mode Grid Size",
+    width = 200,
+    min = gridMin, max = gridMax, step = gridStep,
+    value = U.GridSize(),
+    onChange = function(value) U.SetGridSize(value) end,
+  })
+  gridSlider.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -330)
+  table.insert(widgets, gridSlider)
+
   local function Refresh()
+    gridSlider.SetValue(U.GridSize())
     microbar.SetValue(U.ModuleConfig("microbar", { enabled = true }).enabled)
     reputation.SetValue(U.ModuleConfig("xpbar", { repEnabled = true }).repEnabled)
     minimapButton.SetValue(U.ModuleConfig("minimap", { enabled = true }).enabled)

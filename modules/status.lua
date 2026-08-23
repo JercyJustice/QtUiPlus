@@ -144,14 +144,42 @@ local function LabelWidth(label)
   return ok and math.ceil(tonumber(width) or 0) or 0
 end
 
+-- "Compact" hides the captions ("FPS:", "MS:", ...) and keeps the values, for
+-- players who know what the numbers are and want the strip shorter.
+local function Compact()
+  local layout = QtP:GetLayout()
+  return layout and layout.dataTextCompact == true
+end
+
+local function ApplyCompact()
+  if not display then return end
+  local compact = Compact()
+  local captions = {
+    display.fpsCaption, display.latencyCaption,
+    display.durabilityCaption, display.bagsCaption,
+  }
+  local i
+  for i = 1, table.getn(captions) do
+    local caption = captions[i]
+    if caption then
+      if compact then caption:Hide() else caption:Show() end
+    end
+  end
+end
+
+local function CaptionWidth(label)
+  if Compact() then return 0 end
+  return LabelWidth(label)
+end
+
 local function UpdateOverlayWidth()
   if not anchor or not display then return end
 
   local width = HORIZONTAL_PADDING
-  width = width + LabelWidth(display.fpsCaption) + 2 + LabelWidth(display.fpsValue)
-  width = width + MODULE_GAP + LabelWidth(display.latencyCaption) + 2 + LabelWidth(display.latencyValue)
-  width = width + MODULE_GAP + LabelWidth(display.durabilityCaption) + 2 + LabelWidth(display.durabilityValue)
-  width = width + MODULE_GAP + LabelWidth(display.bagsCaption) + 2 + LabelWidth(display.bagsValue)
+  width = width + CaptionWidth(display.fpsCaption) + 2 + LabelWidth(display.fpsValue)
+  width = width + MODULE_GAP + CaptionWidth(display.latencyCaption) + 2 + LabelWidth(display.latencyValue)
+  width = width + MODULE_GAP + CaptionWidth(display.durabilityCaption) + 2 + LabelWidth(display.durabilityValue)
+  width = width + MODULE_GAP + CaptionWidth(display.bagsCaption) + 2 + LabelWidth(display.bagsValue)
   width = width + MODULE_GAP
   width = width + (display.gold.contentWidth or 26) + COIN_GAP
   width = width + (display.silver.contentWidth or 26) + COIN_GAP
@@ -581,6 +609,7 @@ function S:OnEnable()
     if U.PerfDisabled and U.PerfDisabled("status") then return end
     RefreshPerformance()
     RefreshMoney()
+    ApplyCompact()
     RefreshBags()   -- no-op unless a BAG_UPDATE marked it dirty
     RefreshClock()
     durabilityAge = durabilityAge + 1

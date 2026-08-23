@@ -55,6 +55,30 @@ local CLASS_FROM_LABEL = {
 local classCache = {}
 local pagingHooked = false
 
+local FONT_LIMITS = { min = 8, max = 20, step = 1 }
+local FONT_DEFAULT = 12
+local chatCfg
+
+local function FontSize()
+  if not chatCfg then return FONT_DEFAULT end
+  local size = U.Round(tonumber(chatCfg.fontSize) or FONT_DEFAULT)
+  if size < FONT_LIMITS.min then size = FONT_LIMITS.min end
+  if size > FONT_LIMITS.max then size = FONT_LIMITS.max end
+  return size
+end
+
+-- Applies the configured size to every stock chat frame. U.SetFont resolves a
+-- font path this client actually honours; a plain SetFont is a no-op here while
+-- a Font object is attached, which is why it goes through the helper.
+local function ApplyChatFont()
+  local size = FontSize()
+  local i
+  for i = 1, NUM_CHAT_FRAMES do
+    local frame = U.G("ChatFrame" .. i)
+    if frame then U.SetFont(frame, size, "") end
+  end
+end
+
 local function Truthy(value)
   return value == true or value == 1 or value == "1"
 end
@@ -341,7 +365,87 @@ local function HookPaging()
   end)
 end
 
+-- ---------------------------------------------------------------------------
+-- Settings
+-- ---------------------------------------------------------------------------
+local function BuildSettingsPage(parent)
+  local widgets = {}
+
+  local header = U.CreateSectionHeader(parent, {
+    text = "Chat", width = 484, y = -4,
+  })
+  table.insert(widgets, header)
+
+  local timestamps = U.CreateCheckbox(parent, {
+    name = "QtUiPlusChatTimestamps",
+    text = "Timestamps",
+    value = QtP:GetLayout().chatTime ~= false,
+    onChange = function(value)
+      QtP:GetLayout().chatTime = value and true or false
+    end,
+  })
+  timestamps.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -34)
+  table.insert(widgets, timestamps)
+
+  local classNames = U.CreateCheckbox(parent, {
+    name = "QtUiPlusChatClassNames",
+    text = "Class-coloured player names",
+    value = QtP:GetLayout().chatClassNames ~= false,
+    onChange = function(value)
+      QtP:GetLayout().chatClassNames = value and true or false
+    end,
+  })
+  classNames.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -58)
+  table.insert(widgets, classNames)
+
+  local font = U.CreateSlider(parent, {
+    name = "QtUiPlusChatFontSize",
+    text = "Chat Font Size",
+    width = 200,
+    min = FONT_LIMITS.min, max = FONT_LIMITS.max, step = FONT_LIMITS.step,
+    value = FontSize(),
+    onChange = function(value)
+      if chatCfg then chatCfg.fontSize = value end
+      ApplyChatFont()
+    end,
+  })
+  font.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -102)
+  table.insert(widgets, font)
+
+  local hint = U.CreateSettingsLabel(parent, {
+    size = M.fontSize.small, color = M.color.textDim,
+    inherits = "GameFontNormalSmall", justify = "LEFT",
+  })
+  if hint then
+    U.AnchorSettingsDescription(hint, font.box,
+                                -math.floor((font.width - font.boxWidth) / 2))
+    hint:SetText("Chat width and height are set by dragging the grip on the " ..
+                 "bottom-right corner of the chat window.")
+    table.insert(widgets, hint)
+  end
+
+  local function Refresh()
+    local layout = QtP:GetLayout()
+    timestamps.SetValue(layout.chatTime ~= false)
+    classNames.SetValue(layout.chatClassNames ~= false)
+    font.SetValue(FontSize())
+  end
+
+  return widgets, Refresh
+end
+
+function C:OnInit()
+  chatCfg = U.ModuleConfig("chatextras", { fontSize = FONT_DEFAULT })
+  if type(U.RegisterSettingsTab) == "function" then
+    U.RegisterSettingsTab("chatextras", "Chat", BuildSettingsPage)
+  end
+end
+
 function C:OnEnable()
+  if not chatCfg then
+    chatCfg = U.ModuleConfig("chatextras", { fontSize = FONT_DEFAULT })
+  end
+  ApplyChatFont()
   HookAllChatFrames()
   HookPaging()
 

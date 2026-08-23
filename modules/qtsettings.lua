@@ -105,7 +105,14 @@ local function BuildPage(parent)
     end,
   })
 
-  boxes.estimateMobHealth = LayoutToggle(parent, widgets, 7, {
+  boxes.dataTextCompact = LayoutToggle(parent, widgets, 7, {
+    key = "dataTextCompact",
+    text = "Compact status strip",
+    description = "Hides the FPS / MS / Durability / Bags captions and keeps " ..
+                  "only the values, for a shorter strip.",
+  })
+
+  boxes.estimateMobHealth = LayoutToggle(parent, widgets, 8, {
     key = "estimateMobHealth",
     text = "Enemy health from creature table",
     description = "Resolves real hit points for enemies the client reports " ..
@@ -128,7 +135,7 @@ local function BuildPage(parent)
       end
     end,
   })
-  meter.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, ROW_START - 7 * ROW_STEP)
+  meter.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, ROW_START - 8 * ROW_STEP)
   table.insert(widgets, meter)
   boxes.damageMeter = meter
 
