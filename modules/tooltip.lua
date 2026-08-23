@@ -163,6 +163,22 @@ local function StyleStatusBar()
   return bar
 end
 
+-- Flat fill + hide stock corner textures. Shared by GameTooltip and the
+-- shopping compare frames (wiki: ShoppingTooltip1/2 are the same type).
+local function StyleTooltipFrame(tooltip, name)
+  if not tooltip then return end
+  U.CreateBackdrop(tooltip, {
+    background = M.color.background,
+    border = M.color.border,
+  })
+  ClearNativeEdge(tooltip)
+  if type(name) ~= "string" then return end
+  local i
+  for i = 1, 3 do
+    U.HideRegion(U.G(name .. "Texture" .. i))
+  end
+end
+
 local function StyleFrame()
   local tooltip = U.G("GameTooltip")
   if not tooltip then return end
@@ -170,20 +186,7 @@ local function StyleFrame()
   -- Fill only, no edgeFile: the stock bevel lives on the backdrop's edge, and
   -- rendering.backdrop_edge_fractional_not_rasterized means QtUiPlus draws its
   -- own outline from plain textures instead (core/style.lua).
-  U.CreateBackdrop(tooltip, {
-    background = M.color.background,
-    border = M.color.border,
-  })
-  ClearNativeEdge(tooltip)
-
-  -- GameTooltipTexture1-3 are the only Texture regions on this client's
-  -- tooltip (the other 60 regions are the Left/Right fontstrings); they carry
-  -- the remaining stock corner art.
-  local i
-  for i = 1, 3 do
-    U.HideRegion(U.G("GameTooltipTexture" .. i))
-  end
-
+  StyleTooltipFrame(tooltip, "GameTooltip")
   StyleStatusBar()
 end
 
@@ -476,11 +479,14 @@ local function IsCornerTooltip(tooltip)
 end
 
 -- Wiki: SetOwner clears lines and stores the anchor. Safe only before a fill.
+-- Do not fall back to UIParent: that would steal a button owner (paperdoll
+-- Character*Slot) and then eqcompare cannot see IsOwned(slot).
 local function FollowCursor(tooltip, owner)
   if not tooltip or not tooltip.SetOwner then return end
   local kind = AnchorType(tooltip)
   if kind == "ANCHOR_CURSOR" or kind == "ANCHOR_PRESERVE" then return end
-  owner = owner or TooltipOwner(tooltip) or UIParent
+  owner = owner or TooltipOwner(tooltip)
+  if not owner then return end
   pcall(tooltip.SetOwner, tooltip, owner, "ANCHOR_CURSOR")
 end
 
@@ -560,6 +566,21 @@ function TT.OnEnable()
       if kind == "ANCHOR_CURSOR" or kind == "ANCHOR_PRESERVE" then return end
       if IsCornerTooltip(tooltip) then PlaceAtAnchor(tooltip) end
     end)
+  end
+
+  -- Compare / item-ref frames are the same GameTooltip type (wiki) but keep
+  -- the stock bevel unless flattened here. Legitimate eqcompare windows then
+  -- match the item tooltip instead of looking like a second native tooltip.
+  local extra = { "ShoppingTooltip1", "ShoppingTooltip2", "ItemRefTooltip" }
+  local e
+  for e = 1, table.getn(extra) do
+    local name = extra[e]
+    local frame = U.G(name)
+    if frame then
+      U.PostHookScript(frame, "OnShow", function()
+        StyleTooltipFrame(frame, name)
+      end)
+    end
   end
 
   U.RegisterUpdate("tooltip.player-style", 0.10, function()

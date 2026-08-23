@@ -147,19 +147,69 @@ local function PreferredSide()
   return "left"
 end
 
--- The paperdoll tooltip already is the equipped item. Showing ShoppingTooltip
--- against that slot duplicates it (and for rings/trinkets/1H weapons pops a
--- second window for the other slot). Skip when GameTooltip is owned by a
--- Character* gear button.
+-- Native paperdoll slots. Hovering one already shows that equipped item, so
+-- ShoppingTooltip would duplicate it (and for rings/trinkets/1H weapons pop
+-- a second window for the other slot).
+local PAPERDOLL_SLOTS = {
+  "HeadSlot", "NeckSlot", "ShoulderSlot", "BackSlot", "ChestSlot",
+  "ShirtSlot", "TabardSlot", "WristSlot",
+  "HandsSlot", "WaistSlot", "LegsSlot", "FeetSlot",
+  "Finger0Slot", "Finger1Slot", "Trinket0Slot", "Trinket1Slot",
+  "MainHandSlot", "SecondaryHandSlot", "RangedSlot", "AmmoSlot",
+}
+
+-- Wiki GameTooltip#isowned: true when `frame` is the SetOwner target.
+-- GetOwner is not on the GameTooltip widget page; a previous skip that
+-- called it silently failed, which is why the character sheet showed the
+-- same gloves twice (GameTooltip + ShoppingTooltip1).
+local function IsOwnedBy(tooltip, frame)
+  if not tooltip or not frame or not tooltip.IsOwned then return false end
+  local ok, owned = pcall(tooltip.IsOwned, tooltip, frame)
+  return ok and owned and owned ~= false and owned ~= 0
+end
+
 local function IsPaperDollOwner(tooltip)
-  if not tooltip or not tooltip.GetOwner then return false end
-  local ok, owner = pcall(tooltip.GetOwner, tooltip)
-  if not ok or not owner then return false end
-  if not owner.GetName then return false end
-  local nameOk, name = pcall(owner.GetName, owner)
-  if not nameOk or type(name) ~= "string" then return false end
-  if string.find(name, "Character", 1, true) then return true end
+  if not tooltip then return false end
+  local i
+  for i = 1, table.getn(PAPERDOLL_SLOTS) do
+    local slot = U.G("Character" .. PAPERDOLL_SLOTS[i])
+    if slot and IsOwnedBy(tooltip, slot) then return true end
+  end
+  -- Fallback if a custom owner still carries the native name.
+  if tooltip.GetOwner then
+    local ok, owner = pcall(tooltip.GetOwner, tooltip)
+    if ok and owner and owner.GetName then
+      local nameOk, name = pcall(owner.GetName, owner)
+      if nameOk and type(name) == "string" and
+         string.find(name, "Character", 1, true) then
+        return true
+      end
+    end
+  end
   return false
+end
+
+-- True when the hovered tooltip already is that equipped slot: comparing it
+-- to itself is the duplicate on the paperdoll.
+local function SameAsEquipped(slotName)
+  local slotInfo = U.G("GetInventorySlotInfo")
+  local itemLink = U.G("GetInventoryItemLink")
+  local itemInfo = U.G("GetItemInfo")
+  if type(slotInfo) ~= "function" or type(itemLink) ~= "function" or
+     type(itemInfo) ~= "function" then
+    return false
+  end
+  local ok, slotID = pcall(slotInfo, slotName)
+  if not ok or not slotID then return false end
+  local linkOk, link = pcall(itemLink, "player", slotID)
+  if not linkOk or type(link) ~= "string" then return false end
+  local infoOk, name = pcall(itemInfo, link)
+  if not infoOk or type(name) ~= "string" or name == "" then return false end
+  local label = U.G("GameTooltipTextLeft1")
+  if not label or not label.GetText then return false end
+  local textOk, text = pcall(label.GetText, label)
+  if not textOk or type(text) ~= "string" then return false end
+  return text == name
 end
 
 local function OnTooltipShow()
@@ -196,6 +246,10 @@ local function OnTooltipShow()
       local n
       for n = 1, table.getn(rows) do
         if text == rows[n].label then
+          if SameAsEquipped(rows[n].slot) then
+            HideCompare()
+            return
+          end
           local side = PreferredSide()
           local shown = ShowEquipped(tooltip, rows[n].slot,
                                      U.G("ShoppingTooltip1"), side)
