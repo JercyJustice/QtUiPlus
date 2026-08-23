@@ -263,12 +263,13 @@ local STAT_DROP_H = 18
 local STAT_ROWS = 6
 local STAT_GAP = 8
 local STAT_LABEL_W = 64
--- Both stat dropdowns are one widget anchored to statOverlay at one y, so on
--- paper they cannot disagree; USER_CONFIRMED_INGAME they still do, the left box
--- drawing this many pixels above the right. Measured off the client rather than
--- derived, so it lives here as a named number: raise it to drop the Base Stats
--- box further, set it to 0 if a later client build stops needing it.
-local STAT_LEFT_DROP_Y = 3
+-- USER_CONFIRMED_INGAME: it is the Base Stats *label* that reads high, not its
+-- box -- the boxes are level and moving one of them was wrong. The left select
+-- therefore carries an extra drop on its label alone (see U.CreateSelect's
+-- labelOffsetY option); its box, arrow and the right select are untouched.
+-- Measured off the client, not derived: raise it to drop the text further, set
+-- it to 0 if a later client build stops needing it.
+local STAT_LEFT_LABEL_DROP = 3
 local STAT_CATS = {
   { key = "base",          label = "Base Stats" },
   { key = "melee",         label = "Melee" },
@@ -630,7 +631,7 @@ PlaceStatSelect = function()
   SizeButton(leftBtn)
   if leftBtn then
     pcall(leftBtn.SetPoint, leftBtn, "BOTTOMLEFT", statOverlay, "BOTTOMLEFT",
-          0, bottom - STAT_LEFT_DROP_Y)
+          0, bottom)
   end
   HideCaption(statLeft)
 
@@ -666,6 +667,7 @@ local function BuildStatPanel()
     name = "QtUiPlusCharStatLeft",
     width = STAT_COL_W,
     height = STAT_DROP_H,
+    labelOffsetY = (U.SELECT_LABEL_OFFSET_Y or 1) - STAT_LEFT_LABEL_DROP,
     values = STAT_CATS,
     value = cfg.leftCat or "defenses",
     onChange = function(key)

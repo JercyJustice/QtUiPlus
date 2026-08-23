@@ -522,21 +522,32 @@ function U.CreateSelect(parent, options)
   -- toward the bottom, which is what put the character-sheet stat dropdowns a
   -- few pixels below the middle of their box. Clamp the region to the control
   -- height and centre it explicitly (the recipe core/dropdown.lua already uses
-  -- for native dropdown controls) so only the shared one-pixel residual in
-  -- U.SELECT_LABEL_OFFSET_Y is left to correct. The arrow rides the same
-  -- offset so the glyph and the value keep one baseline.
-  local labelY = U.SELECT_LABEL_OFFSET_Y or -1
+  -- for native dropdown controls) so only the shared residual in
+  -- U.SELECT_LABEL_OFFSET_Y is left to correct.
+  --
+  -- options.labelOffsetY overrides that residual for one control's *label*
+  -- only. The arrow keeps the shared value, so a caller correcting a label this
+  -- client draws off its line does not knock that control's glyph out of line
+  -- with every other select's.
+  local arrowY = U.SELECT_LABEL_OFFSET_Y or -1
+  local labelY = tonumber(options.labelOffsetY)
+  if not labelY then labelY = arrowY end
 
   if arrow then
-    arrow:SetPoint("RIGHT", button, "RIGHT", -6, labelY)
+    arrow:SetPoint("RIGHT", button, "RIGHT", -6, arrowY)
     arrow:SetText("v")
   end
 
   if button.label then
     pcall(button.label.ClearAllPoints, button.label)
     pcall(button.label.SetPoint, button.label, "LEFT", button, "LEFT", 8, labelY)
+    -- The right anchor hangs off the arrow, which already carries arrowY, so
+    -- the offset here is the difference between the two lines. Passing labelY
+    -- straight through anchored the region's right edge a pixel below its left
+    -- and left the client resolving a region taller than the one asked for.
     pcall(button.label.SetPoint, button.label, "RIGHT",
-          arrow or button, arrow and "LEFT" or "RIGHT", -4, labelY)
+          arrow or button, arrow and "LEFT" or "RIGHT", -4,
+          arrow and (labelY - arrowY) or labelY)
     pcall(button.label.SetJustifyH, button.label, "LEFT")
     pcall(button.label.SetHeight, button.label, height)
     if button.label.SetJustifyV then
