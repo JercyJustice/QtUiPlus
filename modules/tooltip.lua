@@ -188,9 +188,7 @@ local function StyleFrame()
   -- own outline from plain textures instead (core/style.lua).
   StyleTooltipFrame(tooltip, "GameTooltip")
   StyleStatusBar()
-  -- A leftover empty tooltip on top of a unit frame eats clicks (party
-  -- targeting). Wiki Frame#enablemouse. Never mouse-enable GameTooltip.
-  pcall(tooltip.EnableMouse, tooltip, false)
+  DropMouse(tooltip)
 end
 
 -- ---------------------------------------------------------------------------
@@ -371,6 +369,7 @@ end
 -- ---------------------------------------------------------------------------
 
 local hookFrame
+local DropMouse
 
 local function Restyle()
   RefreshTooltip(true)
@@ -484,6 +483,36 @@ local function PlaceAtAnchor(tooltip)
   end)
 end
 
+-- A tooltip under the cursor steals world mouseover: the unit is lost, the
+-- client hides GameTooltip, the unit returns, flash. Wiki Frame#enablemouse.
+-- Punch every child too (status bar, restyle hook, eqcompare watcher).
+DropMouse = function(frame)
+  if not frame then return end
+  if frame.EnableMouse then pcall(frame.EnableMouse, frame, false) end
+  local bar = U.G("GameTooltipStatusBar")
+  if bar and bar.EnableMouse then pcall(bar.EnableMouse, bar, false) end
+  if hookFrame and hookFrame.EnableMouse then
+    pcall(hookFrame.EnableMouse, hookFrame, false)
+  end
+  if frame.GetChildren then
+    pcall(function()
+      local kids = { frame:GetChildren() }
+      local i
+      for i = 1, table.getn(kids) do
+        local kid = kids[i]
+        if kid and kid.EnableMouse then pcall(kid.EnableMouse, kid, false) end
+      end
+    end)
+  end
+end
+
+local function MouseoverExists()
+  local exists = U.G("UnitExists")
+  if type(exists) ~= "function" then return false end
+  local ok, value = pcall(exists, "mouseover")
+  return ok and value ~= nil and value ~= false and value ~= 0
+end
+
 local function AnchorType(tooltip)
   if not tooltip or not tooltip.GetAnchorType then return nil end
   local ok, value = pcall(tooltip.GetAnchorType, tooltip)
@@ -565,6 +594,13 @@ local function HookUnitSetters(tooltip)
       tooltip[name] = function(self, a, b, c, d)
         itemCursor = false
         local ok, r1, r2, r3 = pcall(original, self, a, b, c, d)
+        -- SetUnit("mouseover") is the world-hover path. Pin to the dummy
+        -- after the fill so a cursor parent cannot sit the tooltip on the
+        -- unit and cancel mouseover.
+        if name == "SetUnit" and a == "mouseover" then
+          PlaceAtAnchor(self)
+          DropMouse(self)
+        end
         if ok then return r1, r2, r3 end
       end
     end
@@ -631,30 +667,31 @@ function TT.OnEnable()
   HookUnitSetters(tooltip)
   HookCursorSetters(tooltip)
 
-  -- Vanilla world-unit tooltips go through this global with UIParent or
-  -- WorldFrame and sit on the dummy. Item buttons pass themselves as parent;
-  -- pin beside the button (ANCHOR_RIGHT), never ANCHOR_CURSOR.
+  -- Always park default-anchor tooltips on the dummy. Emberveil may pass a
+  -- cursor-tracking parent (not WorldFrame); PinToOwner then sits the
+  -- tooltip on the 3D unit, mouseover dies, the tooltip hides.
   if type(U.PostHookGlobal) == "function" then
     U.PostHookGlobal("GameTooltip_SetDefaultAnchor", function(tip, parent)
       if not tip then return end
-      if parent and parent ~= UIParent and parent ~= U.G("WorldFrame") then
-        PinToOwner(tip, parent)
-        return
-      end
       itemCursor = false
+      DropMouse(tip)
       PlaceAtAnchor(tip)
     end)
   end
 
   if tooltip then
+    DropMouse(tooltip)
     U.PostHookScript(tooltip, "OnShow", function()
+      DropMouse(tooltip)
+      if MouseoverExists() then
+        PlaceAtAnchor(tooltip)
+        return
+      end
       local kind = AnchorType(tooltip) or ownedAnchor
       if itemCursor or (kind and KEEP_OWNER_ANCHOR[kind]) then
-        pcall(tooltip.EnableMouse, tooltip, false)
         return
       end
       if IsCornerTooltip(tooltip) then PlaceAtAnchor(tooltip) end
-      pcall(tooltip.EnableMouse, tooltip, false)
     end)
     U.PostHookScript(tooltip, "OnHide", function()
       itemCursor = false
