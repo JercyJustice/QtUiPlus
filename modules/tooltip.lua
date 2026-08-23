@@ -410,10 +410,9 @@ end
 --   * World / unit tooltips that go through GameTooltip_SetDefaultAnchor with
 --     UIParent or WorldFrame sit on the dummy mover (the "Tooltip" handle in
 --     Anchor Mode).
---   * Item tooltips (quest log rewards, bags, paperdoll, loot, vendor, mail,
---     auction, trade, craft) follow the cursor. Wiki SetOwner ANCHOR_CURSOR:
---     "Clears points and follows the cursor (plus offsets)."
---     https://emberveil.org/wiki/lua/widgets/GameTooltip#setowner
+--   * Item tooltips that SetOwner a button stay on that button (ANCHOR_RIGHT
+--     / LEFT). ANCHOR_CURSOR is not used: it covers the hovered widget, the
+--     widget OnLeave fires, and the tooltip vanishes immediately.
 --
 -- SetOwner always clears lines, so cursor ownership is applied in
 -- SetDefaultAnchor (before the fill) and again at the start of each item
@@ -510,24 +509,26 @@ local function RememberOwner(owner, anchor)
   if type(anchor) == "string" then ownedAnchor = anchor end
 end
 
--- Wiki: SetOwner clears lines and stores the anchor. Safe only before a fill.
--- UIParent is a valid cursor owner (ANCHOR_CURSOR ignores the frame and
--- follows the mouse). Prefer the recorded button so paperdoll IsOwned still
--- sees Character*Slot.
---
--- Do not steal a bag/slot ANCHOR_LEFT/RIGHT onto ANCHOR_CURSOR: the tooltip
--- then sits under the mouse, the slot OnLeave fires, and GameTooltip:Hide()
--- eats it in a millisecond (inventory flash).
-local function FollowCursor(tooltip, owner)
+-- Pin a widget-owned tooltip beside the widget. ANCHOR_CURSOR puts the
+-- frame under the mouse; the widget OnLeave then GameTooltip:Hide() so the
+-- tooltip flashes for a millisecond everywhere (bags, paperdoll, quests,
+-- merchant). Wiki SetOwner ANCHOR_RIGHT: tooltip bottom-left to owner
+-- top-right, clear of the hover target.
+-- https://emberveil.org/wiki/lua/widgets/GameTooltip#setowner
+local function PinToOwner(tooltip, owner)
   if not tooltip or not tooltip.SetOwner then return end
   local kind = AnchorType(tooltip) or ownedAnchor
-  if kind == "ANCHOR_CURSOR" or kind == "ANCHOR_PRESERVE" then return end
-  if kind and KEEP_OWNER_ANCHOR[kind] then return end
-  owner = owner or ownedBy or TooltipOwner(tooltip) or UIParent
-  RememberOwner(owner, "ANCHOR_CURSOR")
+  if kind == "ANCHOR_PRESERVE" then return end
+  if kind and KEEP_OWNER_ANCHOR[kind] and kind ~= "ANCHOR_CURSOR" then
+    return
+  end
+  owner = owner or ownedBy or TooltipOwner(tooltip)
+  if not owner or owner == UIParent or owner == U.G("WorldFrame") then
+    return
+  end
+  RememberOwner(owner, "ANCHOR_RIGHT")
   itemCursor = true
-  -- Offset so a remaining cursor tooltip is not under the pointer.
-  pcall(tooltip.SetOwner, tooltip, owner, "ANCHOR_CURSOR", 16, 16)
+  pcall(tooltip.SetOwner, tooltip, owner, "ANCHOR_RIGHT")
 end
 
 local function HookSetOwner(tooltip)
@@ -578,8 +579,9 @@ local function HookCursorSetters(tooltip)
     local original = tooltip[name]
     if original ~= nil then
       tooltip[name] = function(self, a, b, c, d)
+        -- Do not retarget to the cursor. Only remember that this is an item
+        -- fill so OnShow does not PlaceAtAnchor onto the dummy.
         itemCursor = true
-        FollowCursor(self)
         local ok, r1, r2, r3 = pcall(original, self, a, b, c, d)
         if ok then return r1, r2, r3 end
       end
@@ -630,13 +632,13 @@ function TT.OnEnable()
   HookCursorSetters(tooltip)
 
   -- Vanilla world-unit tooltips go through this global with UIParent or
-  -- WorldFrame. Item buttons pass themselves as parent; those follow the
-  -- cursor instead of the dummy. Wiki SetOwner / GetAnchorType as above.
+  -- WorldFrame and sit on the dummy. Item buttons pass themselves as parent;
+  -- pin beside the button (ANCHOR_RIGHT), never ANCHOR_CURSOR.
   if type(U.PostHookGlobal) == "function" then
     U.PostHookGlobal("GameTooltip_SetDefaultAnchor", function(tip, parent)
       if not tip then return end
       if parent and parent ~= UIParent and parent ~= U.G("WorldFrame") then
-        FollowCursor(tip, parent)
+        PinToOwner(tip, parent)
         return
       end
       itemCursor = false
