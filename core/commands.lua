@@ -902,12 +902,12 @@ handlers["np"] = function() ShowNameplateDump() end
 
 -- /qtp roll -- what the group loot roll window is actually made of.
 --
--- A bar with a health readout across it ("Dead", "1.5k - 96%") keeps appearing
--- inside the card. USER_CONFIRMED_INGAME it is in the roll window; nothing
--- modules/lootroll.lua draws puts it there, and guessing from screenshots has
--- cost several releases. This prints the frame's children and regions with
--- their type, size, text and anchor, so whatever owns that bar is named rather
--- than inferred. Run it while a roll is on screen.
+-- A bar with a health readout across it ("Dead", "1.5k - 96%") draws inside the
+-- roll window, USER_CONFIRMED_INGAME, and was never identified. The skin that
+-- was on this window is gone, but the bar is not the skin's -- it showed up on
+-- the stock frame too -- so the dump stays: it prints the frame's children and
+-- regions with their type, size, text, anchor and parent, and walks UIParent
+-- and WorldFrame for anything else on top. Run it while a roll is on screen.
 local rollDump = {}
 
 function rollDump.Try(object, method, a)
@@ -968,10 +968,10 @@ end
 -- The dump is a written record, not chat output: it runs to dozens of lines,
 -- which is exactly the flood SaveDiagnostic exists for. Chat gets one line.
 --
--- Exposed on U so modules/lootroll.lua can take the same snapshot by itself
--- when a roll opens. Asking for a typed command at the moment a timed window is
--- on screen turned out to be a bad way to collect this: the roll is gone in
--- seconds, and one missed step means another round trip.
+-- Exposed on U so any caller can take the same snapshot. Asking for a typed
+-- command at the moment a timed window is on screen is a poor way to collect
+-- this -- the roll is gone in seconds -- so it is kept callable rather than
+-- being locked inside the command handler.
 function U.LootRollDump()
   local lines = {}
   local function Add(object, label)

@@ -39,12 +39,9 @@ local PANEL_NAMES = {
   "QtUiPlusBagFrame", "QtUiPlusBankFrame",
 }
 
--- GroupLootFrame1..4 used to be listed here too, on HIGH. modules/lootroll.lua
--- owns those frames now and raises them further; both hooks fire on the same
--- OnShow and this one is registered later, so keeping them here just put the
--- roll window back under whatever was covering it.
 local LOOT_NAMES = {
   "LootFrame",
+  "GroupLootFrame1", "GroupLootFrame2", "GroupLootFrame3", "GroupLootFrame4",
 }
 
 local function IsMapPanel(frame)
