@@ -395,17 +395,119 @@ end
 -- QtUiPlusDiagDB.rollAuto, so the file holds the last few rolls after any
 -- reload with nothing typed. U.AppendDiagnostic caps the list, so this cannot
 -- grow the SavedVariables file without bound.
+local function Rect(object)
+  if not object or type(object.GetLeft) ~= "function" then return nil end
+  local ok, left = pcall(object.GetLeft, object)
+  if not ok or not tonumber(left) then return nil end
+  local okR, right = pcall(object.GetRight, object)
+  local okT, top = pcall(object.GetTop, object)
+  local okB, bottom = pcall(object.GetBottom, object)
+  if not okR or not okT or not okB then return nil end
+  if not tonumber(right) or not tonumber(top) or not tonumber(bottom) then
+    return nil
+  end
+  return { left = left, right = right, top = top, bottom = bottom }
+end
+
+local function Overlaps(a, b)
+  if not a or not b then return false end
+  if a.right <= b.left or a.left >= b.right then return false end
+  if a.top <= b.bottom or a.bottom >= b.top then return false end
+  return true
+end
+
+local function Line(object, label, rect)
+  local function Try(method)
+    if type(object[method]) ~= "function" then return nil end
+    local ok, value = pcall(object[method], object)
+    if not ok then return nil end
+    return value
+  end
+  local line = label .. " " .. tostring(Try("GetName") or "<unnamed>") ..
+               " [" .. tostring(Try("GetObjectType") or "?") .. "]" ..
+               " " .. tostring(math.floor(rect.left)) .. "," ..
+               tostring(math.floor(rect.bottom)) .. " " ..
+               tostring(math.floor(rect.right - rect.left)) .. "x" ..
+               tostring(math.floor(rect.top - rect.bottom))
+  local text = Try("GetText")
+  if type(text) == "string" and text ~= "" then
+    line = line .. ' text="' .. text .. '"'
+  end
+  local parent = Try("GetParent")
+  if parent then
+    local okName, parentName = pcall(function() return parent:GetName() end)
+    line = line .. " parent=" ..
+           tostring((okName and parentName) or "<unnamed>")
+  end
+  return line
+end
+
+-- What is drawn on top of the card, named.
+--
+-- The bar with the health readout is USER_CONFIRMED_INGAME to be in the roll
+-- window, and moving the card takes the bar with it, so it is not a nameplate
+-- floating over a unit and not one of the unit frames -- every saved mover
+-- position is on the other side of the screen. Four dumps failed to name it for
+-- one reason: each re-fetched the frame through U.G and read it as hidden, so
+-- the window was never captured live.
+--
+-- This records geometry instead of hierarchy. The card's own rect is taken from
+-- the frame object Skin was handed -- never re-fetched by name, since identity
+-- through U.G is exactly what cannot be trusted here -- and everything shown
+-- that overlaps that rect is written down with its name, type, rect, text and
+-- parent. Whatever the bar is, it overlaps the card by definition, so it cannot
+-- stay anonymous.
 local function RecordDump(frame)
-  if type(U.LootRollDump) ~= "function" then return end
   if type(U.AppendDiagnostic) ~= "function" then return end
-  -- Skin also runs at load, over four frames that are not on screen. Only a
-  -- roll that is actually up is worth a slot in the capped list.
   if not frame or not frame.IsShown then return end
-  local ok, shown = pcall(frame.IsShown, frame)
-  if not ok or not shown then return end
-  pcall(function()
-    U.AppendDiagnostic("rollAuto", U.LootRollDump())
-  end)
+  local shownOk, shown = pcall(frame.IsShown, frame)
+  if not shownOk or not shown then return end
+
+  local card = Rect(frame)
+  if not card then return end
+
+  local lines = {}
+  table.insert(lines, "card " .. tostring(math.floor(card.left)) .. "," ..
+               tostring(math.floor(card.bottom)) .. " " ..
+               tostring(math.floor(card.right - card.left)) .. "x" ..
+               tostring(math.floor(card.top - card.bottom)))
+
+  local function Consider(object, label)
+    if not object then return end
+    if type(object.IsShown) == "function" then
+      local ok, isShown = pcall(object.IsShown, object)
+      if ok and not isShown then return end
+    end
+    local rect = Rect(object)
+    if not rect or not Overlaps(rect, card) then return end
+    table.insert(lines, Line(object, label, rect))
+  end
+
+  -- Depth 2 from each root, plus the card's own tree.
+  local function Walk(root, label, depth)
+    if not root or depth > 2 then return end
+    local ok, children = pcall(function() return { root:GetChildren() } end)
+    if ok and type(children) == "table" then
+      local i
+      for i = 1, table.getn(children) do
+        Consider(children[i], label)
+        Walk(children[i], label .. ">", depth + 1)
+      end
+    end
+    local okR, regions = pcall(function() return { root:GetRegions() } end)
+    if okR and type(regions) == "table" then
+      local i
+      for i = 1, table.getn(regions) do
+        Consider(regions[i], label .. "r")
+      end
+    end
+  end
+
+  Walk(frame, "card", 1)
+  Walk(UIParent, "ui", 1)
+  Walk(U.G("WorldFrame"), "world", 1)
+
+  pcall(function() U.AppendDiagnostic("rollOverlap", lines) end)
 end
 
 local function Skin(name, index)
