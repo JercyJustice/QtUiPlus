@@ -191,6 +191,15 @@ end
 -- dice kept its stock size and spilled over the coin. Both names are listed so
 -- either shape works, in retail's order; anything else found among the frame's
 -- Button children is appended, so a name nobody guessed still lands in the row.
+-- Left-to-right order of the roll row, keyed by the button's name suffix.
+-- RollButton is this client's dice, the Need equivalent.
+local BUTTON_ORDER = {
+  RollButton  = 1,
+  NeedButton  = 1,
+  GreedButton = 2,
+  PassButton  = 3,
+}
+
 local function CollectButtons(name, frame)
   local list, seen = {}, {}
   local iconName = name .. "IconFrame"
@@ -222,16 +231,29 @@ local function CollectButtons(name, frame)
     end
   end
 
-  -- Never nil, so the comparison below cannot fault on a build where GetLeft
-  -- reports nothing; those keep the order they were collected in.
+  -- Left to right by role, not by the x the client happened to give them.
+  -- Sorting on position alone put Greed before Need; the row is meant to read
+  -- Need, Greed, Pass. A button whose name matches none of these keeps its
+  -- relative position after the known ones, ordered among themselves by x.
+  --
+  -- Never nil, so the comparison cannot fault on a build where GetLeft reports
+  -- nothing; those keep the order they were collected in.
   local order = {}
   for i = 1, table.getn(list) do
-    local value
+    local rank = 4
+    local suffix = NameOf(list[i])
+    if suffix then
+      suffix = string.gsub(suffix, "^" .. name, "")
+      rank = BUTTON_ORDER[suffix] or 4
+    end
+
+    local x
     if list[i].GetLeft then
       local okLeft, left = pcall(list[i].GetLeft, list[i])
-      if okLeft then value = tonumber(left) end
+      if okLeft then x = tonumber(left) end
     end
-    order[list[i]] = value or (i * 1000)
+
+    order[list[i]] = rank * 100000 + (x or (i * 1000))
   end
   table.sort(list, function(a, b) return order[a] < order[b] end)
 
