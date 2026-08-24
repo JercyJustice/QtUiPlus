@@ -460,6 +460,7 @@ local function BuildOverlay(frame, parts)
   end
 
   overlay:Show()
+  overlay.qtpVisible = true
   return overlay
 end
 
@@ -570,8 +571,38 @@ local function RefreshPlate(overlay)
   local parts = overlay.parts
   local plate = overlay.plate
 
+  -- A plate that is gone must take its overlay with it.
+  --
+  -- USER_CONFIRMED_INGAME: a bar reading "Dead", with the target's accent
+  -- border, sat on screen over whatever opened there -- the loot roll window,
+  -- both while that window was skinned and after the skin was removed, which is
+  -- what kept the hunt pointed at the wrong module. It is this overlay, left
+  -- behind. It was Show()n once at construction and never hidden again: this
+  -- gate used to `return` on an invisible plate, which only skips the *update*,
+  -- so the frame kept drawing its last name, last health value and last text.
+  -- A mob dies right before a roll window opens, so "Dead" is exactly what it
+  -- was frozen on.
+  --
+  -- Alpha counts as gone as well. This client does not Hide() its plates
+  -- (see the header note), and the target-detection below rests on the client
+  -- fading non-target plates, so a plate faded all the way out is hidden as far
+  -- as the player is concerned even though IsVisible still reports true. Only
+  -- ~zero counts: a partly faded plate is a normal, live one.
   local visible = Call(plate, "IsVisible")
-  if not visible then return end
+  local plateAlpha = tonumber(Call(plate, "GetAlpha")) or 1
+  if not visible or plateAlpha <= 0.01 then
+    if overlay.qtpVisible ~= false then
+      overlay.qtpVisible = false
+      pcall(overlay.Hide, overlay)
+    end
+    return
+  end
+  if overlay.qtpVisible == false then
+    overlay.qtpVisible = true
+    -- The fade pass below is cached; clear it so it reapplies on the way back.
+    overlay.cache.alpha = nil
+    pcall(overlay.Show, overlay)
+  end
 
   -- Re-resolve which fontstring is the level: plates are recycled onto new
   -- units, and a name that happens to be numeric is not worth guarding against
@@ -591,7 +622,6 @@ local function RefreshPlate(overlay)
   -- WORKING_SOURCE (UnrealPfUI): with no per-plate unit token, the current
   -- target's plate is the fully opaque one.
   local hasTarget = ApiTruth("UnitExists", "target")
-  local plateAlpha = tonumber(Call(plate, "GetAlpha")) or 1
   overlay.isTarget = hasTarget and plateAlpha >= 1 and true or false
 
   -- Name
