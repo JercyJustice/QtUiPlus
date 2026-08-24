@@ -65,6 +65,94 @@ local function HookNamedPanels()
   end
 end
 
+-- ---------------------------------------------------------------------------
+-- Loot roll windows
+--
+-- These are left exactly as the client draws them -- no skin, no resize. The
+-- only thing added is placement: the client opens them wherever it likes, which
+-- on this client is the middle of the screen, and there was no way to move them
+-- from Anchor Mode. They are hung off an invisible mover instead, stacked the
+-- way the client stacks them, so the "Loot Roll" handle places all four.
+--
+-- The mover id is the one an earlier, since-removed skin used, so a position
+-- saved back then is picked up rather than orphaned.
+-- ---------------------------------------------------------------------------
+local ROLL_FRAMES = {
+  "GroupLootFrame1", "GroupLootFrame2", "GroupLootFrame3", "GroupLootFrame4",
+}
+local ROLL_GAP = 6
+local rollAnchor
+
+local function BuildRollAnchor()
+  if rollAnchor then return rollAnchor end
+  if type(U.RegisterMover) ~= "function" then return nil end
+
+  local frame = CreateFrame("Frame", "QtUiPlusLootRollAnchor", UIParent)
+  -- Sized from the stock frame so the Anchor Mode handle covers what actually
+  -- appears there; the fallback is the Vanilla template's own size.
+  local width, height = 330, 60
+  local first = U.G(ROLL_FRAMES[1])
+  if first then
+    local okW, value = pcall(first.GetWidth, first)
+    if okW and tonumber(value) and value > 1 then width = value end
+    local okH, other = pcall(first.GetHeight, first)
+    if okH and tonumber(other) and other > 1 then height = other end
+  end
+  frame:SetWidth(width)
+  frame:SetHeight(height)
+  pcall(frame.EnableMouse, frame, false)
+
+  U.RegisterMover("lootroll.anchor", frame, {
+    label = "Loot Roll",
+    default = {
+      point = "TOPLEFT",
+      relativePoint = "TOPLEFT",
+      x = 24,
+      y = -160,
+    },
+  })
+
+  rollAnchor = frame
+  return frame
+end
+
+-- Frame 1 sits on the mover and each later one under its predecessor, which is
+-- how the client stacks them anyway -- and it needs no height arithmetic, so
+-- the stock frame's own size is never assumed.
+local function PlaceRollFrame(frame, index)
+  local host = BuildRollAnchor()
+  if not host or not frame then return end
+  pcall(function()
+    frame:ClearAllPoints()
+    local previous = index > 1 and U.G(ROLL_FRAMES[index - 1]) or nil
+    if previous then
+      frame:SetPoint("TOPLEFT", previous, "BOTTOMLEFT", 0, -ROLL_GAP)
+    else
+      frame:SetPoint("TOPLEFT", host, "TOPLEFT", 0, 0)
+    end
+  end)
+end
+
+local function HookRollFrames()
+  local i
+  for i = 1, table.getn(ROLL_FRAMES) do
+    local frame = U.G(ROLL_FRAMES[i])
+    if frame then
+      if not frame.qtpRollPlaced then
+        local index = i
+        -- The client positions the frame as it opens it, so the placement has
+        -- to run after that, not once at load.
+        if U.PostHookScript(frame, "OnShow", function()
+             PlaceRollFrame(frame, index)
+           end) then
+          frame.qtpRollPlaced = true
+        end
+      end
+      PlaceRollFrame(frame, i)
+    end
+  end
+end
+
 local function RaiseLoot()
   local i
   for i = 1, table.getn(LOOT_NAMES) do
@@ -86,6 +174,7 @@ function WM:OnEnable()
   end
 
   HookNamedPanels()
+  HookRollFrames()
 
   if type(U.PostHookGlobal) == "function" then
     U.PostHookGlobal("ShowUIPanel", function(frame)
@@ -104,8 +193,11 @@ function WM:OnEnable()
     end)
   end
 
-  U.RegisterEvent("ADDON_LOADED", function() HookNamedPanels() end)
-  U.RegisterEvent("PLAYER_ENTERING_WORLD", function() HookNamedPanels() end)
+  U.RegisterEvent("ADDON_LOADED", function() HookNamedPanels() HookRollFrames() end)
+  U.RegisterEvent("PLAYER_ENTERING_WORLD", function()
+    HookNamedPanels()
+    HookRollFrames()
+  end)
   U.RegisterEvent("LOOT_OPENED", RaiseLoot)
   U.RegisterEvent("LOOT_SLOT_CLEARED", RaiseLoot)
 end
