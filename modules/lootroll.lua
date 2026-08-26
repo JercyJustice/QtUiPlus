@@ -90,6 +90,7 @@ local function StyleIcon(name, quality)
   else
     U.SetBorderColor(icon, M.Unpack(M.color.border))
   end
+  icon.qtpKeep = true
   return icon
 end
 
@@ -196,17 +197,52 @@ local function StyleButtons(name, frame)
         button:SetPoint("RIGHT", frame, "RIGHT", -PAD, 0)
       end
     end)
+    button.qtpKeep = true
     previous = button
   end
   return count
 end
 
-local function StyleName(name, frame, icon, buttonCount, quality)
-  local label = U.G(name .. "Name")
-  if not label then return end
+-- U.G(name.."Name") is not the FontString GetRegions() returns on this client
+-- (same identity split as the roll buttons). HideDuplicateName then faded the
+-- visible one. Scan regions first; fall back to the named global.
+local function FindNameLabel(name, frame, itemName)
+  local function Consider(object, preferMatch)
+    if ObjectTypeOf(object) ~= "FontString" then return nil end
+    if not preferMatch or type(itemName) ~= "string" then return object end
+    local ok, text = pcall(object.GetText, object)
+    if ok and text == itemName then return object end
+    return nil
+  end
+
+  if frame and frame.GetRegions then
+    local ok, regions = pcall(function() return { frame:GetRegions() } end)
+    if ok and type(regions) == "table" then
+      local match, fallback
+      local i
+      for i = 1, table.getn(regions) do
+        local hit = Consider(regions[i], true)
+        if hit then match = hit break end
+        if not fallback then fallback = Consider(regions[i], false) end
+      end
+      if match then return match end
+      if fallback then return fallback end
+    end
+  end
+  return U.G(name .. "Name")
+end
+
+local function StyleName(name, frame, icon, buttonCount, quality, itemName)
+  local label = FindNameLabel(name, frame, itemName)
+  if not label then return nil end
 
   local color = (quality and U.ItemQualityColor(quality)) or M.color.text
   U.SetStockFont(label, M.fontSize.normal, color)
+  if type(itemName) == "string" then
+    pcall(label.SetText, label, itemName)
+  end
+  pcall(label.SetAlpha, label, 1)
+  pcall(label.Show, label)
 
   pcall(function()
     label:ClearAllPoints()
@@ -217,14 +253,35 @@ local function StyleName(name, frame, icon, buttonCount, quality)
   end)
   pcall(label.SetJustifyH, label, "LEFT")
   if label.SetJustifyV then pcall(label.SetJustifyV, label, "CENTER") end
+  return label
+end
+
+-- Same identity split as the name: the StatusBar U.G(name.."Timer") sees is
+-- not always the one still drawing. Collect every StatusBar child, style the
+-- timer, mute the rest (a leftover bar is what sat under the stacked cards).
+-- SetHeight(4) is ignored on this client (energytick.lua); pin a 4px strip
+-- with two corners instead.
+local function EachStatusBar(frame, callback)
+  if not frame or not frame.GetChildren then return end
+  local ok, children = pcall(function() return { frame:GetChildren() } end)
+  if not ok or type(children) ~= "table" then return end
+  local i
+  for i = 1, table.getn(children) do
+    if ObjectTypeOf(children[i]) == "StatusBar" then callback(children[i]) end
+  end
 end
 
 local function StyleTimer(name, frame)
-  local bar = U.G(name .. "Timer")
-  if not bar then return end
+  local named = U.G(name .. "Timer")
+  local timer = named
+  EachStatusBar(frame, function(bar)
+    local suffix = string.gsub(NameOf(bar) or "", "^" .. name, "")
+    if suffix == "Timer" or not timer then timer = bar end
+  end)
+  if not timer then return end
 
-  if bar.GetRegions then
-    local ok, regions = pcall(function() return { bar:GetRegions() } end)
+  if timer.GetRegions then
+    local ok, regions = pcall(function() return { timer:GetRegions() } end)
     if ok and type(regions) == "table" then
       local i
       for i = 1, table.getn(regions) do
@@ -239,15 +296,25 @@ local function StyleTimer(name, frame)
       end
     end
   end
-  pcall(bar.SetStatusBarTexture, bar, M.texture.plain)
-  pcall(bar.SetStatusBarColor, bar, M.Unpack(M.color.accent))
-  U.CreateBackdrop(bar, { background = M.color.healthBg, border = false })
-  pcall(bar.SetBackdropBorderColor, bar, 0, 0, 0, 0)
+  pcall(timer.SetStatusBarTexture, timer, M.texture.plain)
+  pcall(timer.SetStatusBarColor, timer, M.Unpack(M.color.accent))
+  U.CreateBackdrop(timer, { background = M.color.healthBg, border = false })
+  pcall(timer.SetBackdropBorderColor, timer, 0, 0, 0, 0)
   pcall(function()
-    bar:ClearAllPoints()
-    bar:SetHeight(BAR_H)
-    bar:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 1, 1)
-    bar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -1, 1)
+    timer:ClearAllPoints()
+    timer:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 1, 1)
+    timer:SetPoint("TOPRIGHT", frame, "BOTTOMRIGHT", -1, 1 + BAR_H)
+  end)
+  pcall(timer.SetAlpha, timer, 1)
+  pcall(timer.Show, timer)
+  timer.qtpKeep = true
+
+  EachStatusBar(frame, function(bar)
+    if bar ~= timer and not bar.qtpKeep then
+      pcall(bar.SetAlpha, bar, 0)
+      pcall(bar.Hide, bar)
+      if bar.EnableMouse then pcall(bar.EnableMouse, bar, false) end
+    end
   end)
 end
 
@@ -281,12 +348,12 @@ local function HideDuplicateName(frame, keep, text)
 end
 
 local function KeepChild(parentName, child)
+  if child and child.qtpKeep then return true end
   local objectType = ObjectTypeOf(child)
   if objectType == "Model" or objectType == "PlayerModel" or
      objectType == "DressUpModel" then
     return false
   end
-  if objectType == "StatusBar" then return true end
 
   local childName = NameOf(child)
   if not childName then return false end
@@ -362,9 +429,13 @@ local function Skin(name)
   local quality, itemName = RollItem(frame)
   local icon = StyleIcon(name, quality)
   local buttonCount = StyleButtons(name, frame)
-  StyleName(name, frame, icon, buttonCount, quality)
+  local nameLabel = StyleName(name, frame, icon, buttonCount, quality, itemName)
   StyleTimer(name, frame)
-  HideDuplicateName(frame, U.G(name .. "Name"), itemName)
+  HideDuplicateName(frame, nameLabel, itemName)
+  if nameLabel then
+    pcall(nameLabel.SetAlpha, nameLabel, 1)
+    pcall(nameLabel.Show, nameLabel)
+  end
   MuteExtras(name, frame)
   EnsureGuard()
 end

@@ -164,11 +164,55 @@ end
 -- with no way left to destroy client state. UnrealPfUI (WORKING_SOURCE,
 -- api/ui-widgets.lua SkinDropDown) does not touch list rows at all, which is
 -- the same conclusion from the other direction.
+local function RegionNameOf(region)
+  if not region or type(region.GetName) ~= "function" then return nil end
+  local ok, name = pcall(region.GetName, region)
+  if ok and type(name) == "string" then return name end
+  return nil
+end
+
+local function IsColorSwatchArt(region)
+  local name = RegionNameOf(region)
+  if not name then return false end
+  local lower = string.lower(name)
+  if string.find(lower, "colorswatch", 1, true) then return true end
+  if string.find(lower, "swatchbg", 1, true) then return true end
+  return false
+end
+
 local function SuppressRegionArt(region)
   if not region or not region.GetObjectType then return end
+  if IsColorSwatchArt(region) then return end
   local typeOk, objectType = pcall(region.GetObjectType, region)
   if not typeOk or objectType ~= "Texture" then return end
   pcall(function() if region.SetAlpha then region:SetAlpha(0) end end)
+end
+
+local function RestoreRegionArt(region)
+  if not region then return end
+  pcall(function() if region.SetAlpha then region:SetAlpha(1) end end)
+  pcall(function() if region.Show then region:Show() end end)
+end
+
+-- Channel rows keep a color swatch on the right. Fading every row texture
+-- left those as empty pink boxes and hid the join-check on the same pass.
+local function RestoreColorSwatch(listName, index)
+  local prefix = listName .. "Button" .. index
+  local swatch = U.G(prefix .. "ColorSwatch")
+  if not swatch then return end
+  RestoreRegionArt(swatch)
+  RestoreRegionArt(U.G(prefix .. "ColorSwatchSwatchBg"))
+  if type(swatch.GetNormalTexture) == "function" then
+    local ok, texture = pcall(swatch.GetNormalTexture, swatch)
+    if ok then RestoreRegionArt(texture) end
+  end
+  if swatch.GetRegions then
+    local ok, regions = pcall(function() return { swatch:GetRegions() } end)
+    if ok and type(regions) == "table" then
+      local i
+      for i = 1, table.getn(regions) do RestoreRegionArt(regions[i]) end
+    end
+  end
 end
 
 local function SuppressRowArt(row)
@@ -241,9 +285,17 @@ local function StyleListRow(name, index, checkboxes)
   local text = U.G(name .. "Button" .. index .. "NormalText")
   if not text or not row then return end
 
-  local box = checkboxes and RowCheckbox(row) or row.qtpDropdownCheckbox
+  RestoreColorSwatch(name, index)
+
+  -- Multi-select menus always show the column. Other menus (chat channels)
+  -- still use the native Check shown-flag as "this row is ticked", so a joined
+  -- channel must get an owned mark even without qtpDropdownCheckboxes.
+  local showBox = (checkboxes or selected) and true or false
+  local box = showBox and RowCheckbox(row) or row.qtpDropdownCheckbox
   if box then
-    if checkboxes then
+    if showBox then
+      box:ClearAllPoints()
+      box:SetPoint("LEFT", row, "LEFT", ROW_TEXT_INSET, 0)
       U.SetCheckboxIndicator(box, selected, ROW_CHECK_MARK_INSET)
       box:Show()
     else
@@ -254,7 +306,7 @@ local function StyleListRow(name, index, checkboxes)
   U.SetStockFont(text, M.fontSize.small, selected and M.color.accent or M.color.text)
   pcall(function()
     text:ClearAllPoints()
-    if checkboxes and box then
+    if showBox and box then
       text:SetPoint("LEFT", box, "RIGHT", 6, 0)
     else
       text:SetPoint("LEFT", row, "LEFT", ROW_TEXT_INSET, 0)

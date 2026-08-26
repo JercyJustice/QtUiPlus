@@ -16,16 +16,12 @@
 -- the sibling record covering why a target castbar built the same way pfUI
 -- builds one is not attempted here).
 --
--- Channelled casts (fishing among them) are handled the same way, but on
--- WORKING_SOURCE evidence rather than a runtime capture: query_compat.py has
--- no record at all of SPELLCAST_CHANNEL_START firing on this client (an
--- evidence gap, not a contradiction), so per .claude/rules/unreal-pfui.md this
--- defaults to what UnrealPfUI's libs/libcast.lua demonstrably does with it
--- (libcast.lua:219) -- arg1=castTimeMs, arg2=name, the reverse order from
--- SPELLCAST_START. That reversal lines up with this client's already-confirmed
--- non-standard SPELLCAST_START shape, which is why it's taken as the default
--- rather than the vanilla (duration-only, no name) contract. Unconfirmed until
--- tested against an actual channelled cast (e.g. fishing) in game.
+-- Channelled casts (fishing among them) use SPELLCAST_CHANNEL_START with
+-- UnrealPfUI's libcast.lua:219 argument order (arg1=castTimeMs, arg2=name),
+-- the reverse of SPELLCAST_START. In-game fishing confirmed the name lands
+-- as "Fishing" and the duration as ~30s. The bar drains (remaining → 0)
+-- rather than filling; SPELLCAST_STOP is ignored while a channel is running
+-- because vanilla fires it when the channel *opens*.
 --
 -- Two pieces of this bar rest on WORKING_SOURCE evidence, not on measured
 -- runtime evidence, because query_compat.py returns no match at all for either
@@ -89,7 +85,7 @@ local SIZE_DEFAULTS = {
 }
 local SIZE_LIMITS = {
   width  = { min = 120, max = 500 },
-  height = { min = 14,  max = 48 },
+  height = { min = 16,  max = 80 },
 }
 local GRIP_SIZE = 14
 
@@ -103,14 +99,15 @@ local FALLBACK_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
 -- (events.json has no capture for any of them), so they cost nothing if this
 -- client never sends one and end the cast cleanly if it does.
 local STOP_EVENTS = {
-  "SPELLCAST_STOP", "SPELLCAST_FAILED", "SPELLCAST_INTERRUPTED",
-  "SPELLCAST_CHANNEL_STOP",
+  "SPELLCAST_FAILED", "SPELLCAST_INTERRUPTED",
 }
 
 local bar
 local casting = false
+local channeling = false
 local startTime, duration
 local lastTimeText
+local pendingCommit
 
 -- Anchor-only: mover target for a future target castbar. No cast events feed
 -- it yet (see the header note on castbar.target_polling_contract_unverified
@@ -126,25 +123,86 @@ local targetBar
 -- differently shaped native frame leaves the QtUiPlus castbar functional.
 local nativeCastbarSuppressed = false
 
-local function SuppressNativeCastbar()
+-- Native CastingBarFrame is a StatusBar: parent alpha is ignored and a Lua
+-- Hide() is undone the next time the client calls Show() from SPELLCAST_*.
+-- UnregisterAllEvents is the measured cause of native-frame stalls
+-- (compat.unregisterallevents_native_frame_stall), so this never strips
+-- events. Neutralise Show, zero the fill, and let the periodic sweep keep
+-- the named children down.
+local NATIVE_CASTBAR_NAMES = {
+  "CastingBarFrame",
+  "CastingBarSpark",
+  "CastingBarFlash",
+  "CastingBarText",
+  "CastingBarBorder",
+}
+
+local function PunchNativePart(object)
+  if not object then return end
+  if object.SetValue then pcall(object.SetValue, object, 0) end
+  if object.SetMinMaxValues then pcall(object.SetMinMaxValues, object, 0, 1) end
+  if object.SetStatusBarColor then pcall(object.SetStatusBarColor, object, 0, 0, 0, 0) end
+  if object.SetStatusBarTexture then pcall(object.SetStatusBarTexture, object, "") end
+  if object.SetAlpha then pcall(object.SetAlpha, object, 0) end
+  if object.Hide then pcall(object.Hide, object) end
+  if object.SetText then pcall(object.SetText, object, "") end
+end
+
+local function PunchNativeCastbar(deep)
+  local i
+  for i = 1, table.getn(NATIVE_CASTBAR_NAMES) do
+    PunchNativePart(U.G(NATIVE_CASTBAR_NAMES[i]))
+  end
+  if not deep then return end
   local native = U.G("CastingBarFrame")
   if not native then return end
+  local regions = native.GetRegions and { native:GetRegions() } or {}
+  for i = 1, table.getn(regions) do PunchNativePart(regions[i]) end
+  local children = native.GetChildren and { native:GetChildren() } or {}
+  for i = 1, table.getn(children) do PunchNativePart(children[i]) end
+end
 
-  if type(native.UnregisterAllEvents) == "function" then
-    pcall(native.UnregisterAllEvents, native)
+-- Hide() from OnShow is ignored while the client is still showing the frame,
+-- and StatusBar fill ignores alpha. Replace the scripts so SPELLCAST_* never
+-- paints, without UnregisterAllEvents (that call stalls native frames).
+local function KillNativeCastbarScripts(native)
+  if not native or type(native.SetScript) ~= "function" then return end
+  local function KeepHidden()
+    PunchNativeCastbar(true)
+  end
+  pcall(native.SetScript, native, "OnEvent", KeepHidden)
+  pcall(native.SetScript, native, "OnShow", KeepHidden)
+  -- Hidden frames still receiving OnUpdate would walk regions every
+  -- frame; just Hide. OnEvent/OnShow do the deep punch.
+  pcall(native.SetScript, native, "OnUpdate", function()
+    if native.Hide then pcall(native.Hide, native) end
+    if native.SetAlpha then pcall(native.SetAlpha, native, 0) end
+  end)
+end
+
+local function SuppressNativeCastbar()
+  if type(U.SuppressNativeFrame) == "function" then
+    U.SuppressNativeFrame(NATIVE_CASTBAR_NAMES)
   end
 
-  if type(native.SetScript) == "function" then
-    pcall(native.SetScript, native, "OnShow", function()
-      if type(native.Hide) == "function" then
-        pcall(native.Hide, native)
-      end
-    end)
+  local native = U.G("CastingBarFrame")
+  if native then
+    if native.Show then
+      pcall(function() native.Show = function() end end)
+    end
+    -- Emberveil may keep a Lua OnEvent global even after the widget script
+    -- is replaced. Swallow it so the stock bar cannot repaint.
+    if type(U.SetG) == "function" then
+      pcall(U.SetG, "CastingBarFrame_OnEvent", function() end)
+      pcall(U.SetG, "CastingBarFrame_OnUpdate", function() end)
+      pcall(U.SetG, "CastingBarFrame_OnShow", function() end)
+    end
+    KillNativeCastbarScripts(native)
+    if native.showCastbar ~= nil then native.showCastbar = false end
   end
 
-  if type(native.Hide) == "function" then
-    nativeCastbarSuppressed = pcall(native.Hide, native)
-  end
+  PunchNativeCastbar(true)
+  nativeCastbarSuppressed = native and true or false
 end
 
 -- Pushback bookkeeping, reported by /qtp check: how many SPELLCAST_DELAYED
@@ -171,64 +229,128 @@ local function SizeConfig()
   return sizeCfg
 end
 
+-- SetAllPoints / SetWidth textures on this client keep their last raster
+-- size. After the outer box moves, stamp them again from the frame they
+-- belong to so a dark leftover does not sit behind the new size.
+local function RestampFill(frame)
+  if not frame then return end
+  if frame.qtpFill then
+    frame.qtpFill:ClearAllPoints()
+    frame.qtpFill:SetAllPoints(frame)
+  end
+  if frame.qtpBackground then
+    frame.qtpBackground:ClearAllPoints()
+    frame.qtpBackground:SetAllPoints(frame)
+  end
+end
+
+-- The mover handle is a SetAllPoints child. That pin does not follow
+-- StartSizing, so the yellow outline stays at the old size while the bar
+-- itself moves. Re-pin every layout.
+local function RefitCoverChildren(widget)
+  if not widget or not widget.GetChildren then return end
+  local children = { widget:GetChildren() }
+  local i
+  for i = 1, table.getn(children) do
+    local child = children[i]
+    if child and child ~= widget.iconCell and child ~= widget.barCell
+       and child ~= widget.qtpResizeGrip then
+      child:ClearAllPoints()
+      child:SetAllPoints(widget)
+      RestampFill(child)
+    end
+  end
+end
+
 -- Rebuilds icon cell, progress cell and fill from a new outer size. The icon
 -- stays square (equal to height) so stretching the bar only lengthens the
--- progress cell. skipOuter is set while StartSizing owns the container, so
--- this does not fight the drag with a second SetWidth.
+-- progress cell.
+--
+-- Size comes from corner pins, not SetWidth/SetHeight on the children.
+-- SetHeight is a no-op here once a frame has both a top and a bottom point,
+-- and SetWidth on the inner status bar was leaving its dark background at
+-- the previous size -- the extra box behind the yellow outline. The outer
+-- widget is the only thing StartSizing owns; everything else is stretched
+-- to that box. skipOuter skips SetWidth on the outer so we do not fight
+-- the drag.
 local function LayoutWidget(widget, width, height, skipOuter)
   if not widget then return end
-  width = ClampSize("width", width)
-  height = ClampSize("height", height)
-  local iconSize = height
-  local barWidth = width - iconSize
-  local border = U.BorderSize()
-
+  width = tonumber(width)
+  height = tonumber(height)
   if not skipOuter then
+    width = ClampSize("width", width)
+    height = ClampSize("height", height)
     widget:SetWidth(width)
     widget:SetHeight(height)
+  else
+    if not width or width < 1 then width = SIZE_LIMITS.width.min end
+    if not height or height < 1 then height = SIZE_LIMITS.height.min end
   end
 
+  local showIcon = widget.showIcon ~= false and widget.iconCell
+  local iconSize = showIcon and height or 0
+  local barWidth = width - iconSize
+  if barWidth < 1 then barWidth = 1 end
+  local border = U.BorderSize()
+
   if widget.iconCell then
-    widget.iconCell:SetWidth(iconSize)
-    widget.iconCell:SetHeight(height)
     widget.iconCell:ClearAllPoints()
     widget.iconCell:SetPoint("TOPLEFT", widget, "TOPLEFT", 0, 0)
     widget.iconCell:SetPoint("BOTTOMLEFT", widget, "BOTTOMLEFT", 0, 0)
+    -- Width = height without SetWidth: the right edge sits `height` in from
+    -- the outer left. Hidden icon still occupies no barCell space because
+    -- barCell pins to the outer left instead.
+    widget.iconCell:SetPoint("TOPRIGHT", widget, "TOPLEFT", height, 0)
+    RestampFill(widget.iconCell)
+    if widget.icon then
+      local inset = U.BorderSize()
+      widget.icon:ClearAllPoints()
+      widget.icon:SetPoint("TOPLEFT", widget.iconCell, "TOPLEFT", inset, -inset)
+      widget.icon:SetPoint("BOTTOMRIGHT", widget.iconCell, "BOTTOMRIGHT",
+                           -inset, inset)
+    end
   end
   if widget.barCell then
-    widget.barCell:SetWidth(barWidth)
-    widget.barCell:SetHeight(height)
     widget.barCell:ClearAllPoints()
-    if widget.iconCell then
+    if showIcon then
       widget.barCell:SetPoint("TOPLEFT", widget.iconCell, "TOPRIGHT", 0, 0)
     else
       widget.barCell:SetPoint("TOPLEFT", widget, "TOPLEFT", 0, 0)
     end
     widget.barCell:SetPoint("BOTTOMRIGHT", widget, "BOTTOMRIGHT", 0, 0)
+    RestampFill(widget.barCell)
   end
   if widget.bar then
     local innerW = barWidth - 2 * border
     local innerH = height - 2 * border
-    widget.bar:ClearAllPoints()
-    widget.bar:SetPoint("TOPLEFT", widget.barCell, "TOPLEFT", border, -border)
-    widget.bar:SetPoint("BOTTOMRIGHT", widget.barCell, "BOTTOMRIGHT",
-                        -border, border)
+    if innerW < 1 then innerW = 1 end
+    if innerH < 1 then innerH = 1 end
+    -- Stamp the fill math first, then pin. SizeStatusBar also SetWidth, which
+    -- on this client either no-ops or would let the dark background outgrow
+    -- the yellow outline; the two-point pin is what actually sizes it.
     if U.SizeStatusBar then
       U.SizeStatusBar(widget.bar, innerW, innerH)
     else
-      widget.bar:SetWidth(innerW)
-      widget.bar:SetHeight(innerH)
+      widget.bar.qtpLayoutWidth = innerW
+      widget.bar.qtpLayoutHeight = innerH
       local value = widget.bar.qtpValue
       widget.bar.qtpValue = nil
       pcall(widget.bar.SetValue, widget.bar, value)
     end
+    widget.bar:ClearAllPoints()
+    widget.bar:SetPoint("TOPLEFT", widget.barCell, "TOPLEFT", border, -border)
+    widget.bar:SetPoint("BOTTOMRIGHT", widget.barCell, "BOTTOMRIGHT",
+                        -border, border)
+    RestampFill(widget.bar)
   end
   if widget.name then
     pcall(widget.name.SetWidth, widget.name, math.max(20, barWidth - 34))
   end
 
-  widget.qtpWidth = width
-  widget.qtpHeight = height
+  RefitCoverChildren(widget)
+
+  widget.qtpWidth = skipOuter and ClampSize("width", width) or width
+  widget.qtpHeight = skipOuter and ClampSize("height", height) or height
 end
 
 local function ApplyStoredSize(widget, prefix)
@@ -266,15 +388,38 @@ end
 local function CommitWidgetResize(widget, prefix, moverId)
   if not widget then return end
   local w, h = ReadWidgetSize(widget)
+  -- StartSizing can leave extra anchors that ignore SetHeight. Applying the
+  -- stored mover point (not a freshly captured one) is the working restore
+  -- path on this client; the size stamp then sticks.
   LayoutWidget(widget, w, h)
   local cfg = SizeConfig()
   cfg[prefix .. "Width"] = widget.qtpWidth
   cfg[prefix .. "Height"] = widget.qtpHeight
+  LayoutWidget(widget, cfg[prefix .. "Width"], cfg[prefix .. "Height"])
 
   if moverId and type(U.GetFramePoint) == "function" and type(U.SavePosition) == "function" then
     local point, _, relativePoint, x, y = U.GetFramePoint(widget, 1)
     if point then U.SavePosition(moverId, point, relativePoint, x, y) end
   end
+
+  -- Recapture-then-SetPoint in this same handler is a recorded failed
+  -- restore. Re-apply the stored point on the next tick so StartSizing's
+  -- extra anchors are gone and the clamped size sticks.
+  pendingCommit = { widget = widget, prefix = prefix, moverId = moverId }
+end
+
+local function FlushPendingCommit()
+  local job = pendingCommit
+  if not job then return end
+  pendingCommit = nil
+  if job.moverId and type(U.GetPosition) == "function"
+     and type(U.ApplyFramePoint) == "function" then
+    local saved = U.GetPosition(job.moverId)
+    if saved then U.ApplyFramePoint(job.widget, saved) end
+  end
+  local cfg = SizeConfig()
+  LayoutWidget(job.widget, cfg[job.prefix .. "Width"],
+               cfg[job.prefix .. "Height"])
 end
 
 local function AttachResizeGrip(widget, prefix, moverId)
@@ -428,22 +573,30 @@ end
 -- empty box either. FALLBACK_ICON is still used for the idle placeholder
 -- (ApplyIdlePlaceholder), which is a different case -- there's no cast at all
 -- to have an icon for.
+local function Relayout(widget)
+  if not widget then return end
+  LayoutWidget(widget, widget.qtpWidth or DEFAULT_WIDTH,
+               widget.qtpHeight or DEFAULT_HEIGHT)
+end
+
 local function ApplyIcon(name)
   if not bar.icon then return end
 
   local texture = SpellIcon(name)
   lastIconSource = texture and "spellbook" or "none"
 
-  if not texture then
-    bar.showIcon = false
-    return
+  local show = false
+  if texture and pcall(bar.icon.SetTexture, bar.icon, texture) then
+    show = true
+  elseif texture then
+    lastIconSource = "failed"
   end
 
-  if pcall(bar.icon.SetTexture, bar.icon, texture) then
-    bar.showIcon = true
+  if bar.showIcon ~= show then
+    bar.showIcon = show
+    Relayout(bar)
   else
-    lastIconSource = "failed"
-    bar.showIcon = false
+    bar.showIcon = show
   end
 end
 
@@ -510,7 +663,12 @@ local function ApplyIdlePlaceholder()
   pcall(bar.bar.SetValue, bar.bar, 0.4)
   if bar.name then bar.name:SetText("Cast bar") end
   if bar.icon then pcall(bar.icon.SetTexture, bar.icon, FALLBACK_ICON) end
-  bar.showIcon = true
+  if bar.showIcon ~= true then
+    bar.showIcon = true
+    Relayout(bar)
+  else
+    bar.showIcon = true
+  end
   -- Applied immediately rather than waiting for the next Tick's
   -- UpdateVisibility: a cast that just ended with no icon left the cell
   -- hidden, and it would otherwise stay hidden for one extra frame.
@@ -529,24 +687,38 @@ local function UpdateVisibility()
   SetCellsShown(shown)
 end
 
-local function StartCast(name, castTimeMs)
+-- Duration arrives in milliseconds for both SPELLCAST_START and
+-- SPELLCAST_CHANNEL_START. Values already in seconds (a 1.5s Fireball, a
+-- 30s fish) are left alone: anything above 50 is treated as ms.
+local function DurationSeconds(value)
+  value = tonumber(value) or 0
+  if value > 50 then value = value / 1000 end
+  if value <= 0 then value = 0.01 end
+  return value
+end
+
+local function StartCast(name, castTimeMs, isChannel)
   casting = true
+  channeling = isChannel and true or false
   startTime = GetTime()
-  duration = (tonumber(castTimeMs) or 0) / 1000
-  -- A zero or missing duration would divide-by-zero the fill computation in
-  -- core/style.lua; treat it as an effectively-instant cast instead.
-  if duration <= 0 then duration = 0.01 end
+  duration = DurationSeconds(castTimeMs)
 
   delayCount, delaySeconds = 0, 0
 
   U.SetStatusBarColor(bar.bar, M.Unpack(M.color.cast))
   pcall(bar.bar.SetMinMaxValues, bar.bar, 0, duration)
-  pcall(bar.bar.SetValue, bar.bar, 0)
+  -- Channels drain (full → empty). Ordinary casts fill (empty → full).
+  if channeling then
+    pcall(bar.bar.SetValue, bar.bar, duration)
+  else
+    pcall(bar.bar.SetValue, bar.bar, 0)
+  end
   if bar.name then bar.name:SetText(tostring(name or "")) end
   ApplyIcon(name)
   lastTimeText = nil
   ApplyTimer(duration)
 
+  PunchNativeCastbar(true)
   UpdateVisibility()
 end
 
@@ -556,7 +728,7 @@ end
 -- backwards while the remaining time grows -- the native castbar's behaviour.
 -- The total duration is deliberately untouched; only the end point moves.
 local function DelayCast(delayMs)
-  if not casting then return end
+  if not casting or channeling then return end
 
   local delay = (tonumber(delayMs) or 0) / 1000
   if delay <= 0 then return end
@@ -573,18 +745,50 @@ local function DelayCast(delayMs)
   ApplyTimer(duration - elapsed)
 end
 
+-- SPELLCAST_CHANNEL_UPDATE: arg1 is the new remaining time in ms. Shift the
+-- start so the drain matches, the same way UnrealPfUI's libcast.lua does.
+local function UpdateChannel(remainingMs)
+  if not channeling then return end
+  local remaining = DurationSeconds(remainingMs)
+  startTime = GetTime() + remaining - duration
+  if startTime > GetTime() then startTime = GetTime() end
+  pcall(bar.bar.SetValue, bar.bar, remaining)
+  ApplyTimer(remaining)
+end
+
 local function StopCast()
   if not casting then return end
   casting = false
+  channeling = false
   UpdateVisibility()
+end
+
+-- Vanilla fires SPELLCAST_STOP when a channel *starts* (the cast that opens
+-- the channel finished). Ending the bar on that event would snap fishing
+-- back to the idle placeholder after one frame.
+local function OnHardStop()
+  if channeling then return end
+  StopCast()
 end
 
 local function Tick()
   if U.PerfDisabled and U.PerfDisabled("castbar") then return end
 
+  FlushPendingCommit()
   UpdateVisibility()
   UpdateTargetVisibility()
   UpdateResizeGrips()
+  -- Native bar Show() is often ignored mid-event; keep punching whenever
+  -- the stock frame is actually on screen, not only while we think we
+  -- own a cast (item uses like a recipe can paint native without our
+  -- SPELLCAST_START).
+  local native = U.G("CastingBarFrame")
+  if native then
+    local ok, shown = pcall(native.IsShown, native)
+    if (ok and shown) or casting then
+      PunchNativeCastbar(true)
+    end
+  end
 
   if not casting then
     if bar:IsShown() then ApplyIdlePlaceholder() end
@@ -603,8 +807,13 @@ local function Tick()
   -- hand the fill a negative value.
   if elapsed < 0 then elapsed = 0 end
 
-  pcall(bar.bar.SetValue, bar.bar, elapsed)
-  ApplyTimer(duration - elapsed)
+  local remaining = duration - elapsed
+  if channeling then
+    pcall(bar.bar.SetValue, bar.bar, remaining)
+  else
+    pcall(bar.bar.SetValue, bar.bar, elapsed)
+  end
+  ApplyTimer(remaining)
 end
 
 -- ---------------------------------------------------------------------------
@@ -739,24 +948,43 @@ function CB:OnEnable()
   SuppressNativeCastbar()
 
   U.RegisterEvent("SPELLCAST_START", function(event, name, castTimeMs)
-    StartCast(name, castTimeMs)
+    StartCast(name, castTimeMs, false)
   end)
 
   -- Reversed argument order from SPELLCAST_START -- see the header note on
   -- the channelled-cast evidence gap (castTimeMs first, name second, per
-  -- UnrealPfUI's libcast.lua:219).
-  U.RegisterEvent("SPELLCAST_CHANNEL_START", function(event, castTimeMs, name)
-    StartCast(name, castTimeMs)
+  -- UnrealPfUI's libcast.lua:219). Types are swapped if the client hands
+  -- them the other way around, so a fishing start still gets a name and a
+  -- duration rather than "30000" as the label.
+  U.RegisterEvent("SPELLCAST_CHANNEL_START", function(event, a, b)
+    local ms, name
+    if type(a) == "number" then
+      ms, name = a, b
+    elseif type(b) == "number" then
+      name, ms = a, b
+    else
+      name, ms = a, b
+    end
+    if type(name) ~= "string" then name = tostring(name or "") end
+    StartCast(name, ms, true)
   end)
 
   U.RegisterEvent("SPELLCAST_DELAYED", function(event, delayMs)
     DelayCast(delayMs)
   end)
 
+  U.RegisterEvent("SPELLCAST_CHANNEL_UPDATE", function(event, remainingMs)
+    UpdateChannel(remainingMs)
+  end)
+
+  U.RegisterEvent("SPELLCAST_STOP", OnHardStop)
+
   local i
   for i = 1, table.getn(STOP_EVENTS) do
     U.RegisterEvent(STOP_EVENTS[i], StopCast)
   end
+
+  U.RegisterEvent("SPELLCAST_CHANNEL_STOP", StopCast)
 
   -- Same invalidation UnrealPfUI's libspell uses: a newly learned rank changes
   -- which spellbook index a name resolves to.
@@ -782,6 +1010,7 @@ function U.CastbarReport()
   local shownOk, shown = pcall(bar.IsShown, bar)
   return {
     casting = casting,
+    channeling = channeling,
     shown = shownOk and shown or "?",
     duration = duration,
     remaining = casting and (duration - (GetTime() - startTime)) or nil,

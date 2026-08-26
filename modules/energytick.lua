@@ -220,11 +220,20 @@ local function Build()
   local bar = player and player.power
   if not bar then return false end
 
-  tick = CreateFrame("Frame", "QtUiPlusEnergyTick", bar)
+  -- Parent is the bar's box, not the bar. The mana fill is an ARTWORK texture
+  -- on the bar; on this client a child of that bar (even at a higher frame
+  -- level) still paints under the fill -- the same stacking that made
+  -- unitframes.lua put bar text on a sibling layer at box+10. The tick sits
+  -- between them (box+5) so the marker is over the fill and under the numbers.
+  local host = bar
+  local parentOk, parent = pcall(bar.GetParent, bar)
+  if parentOk and parent then host = parent end
+
+  tick = CreateFrame("Frame", "QtUiPlusEnergyTick", host)
   tick:SetAllPoints(bar)
-  local levelOk, level = pcall(bar.GetFrameLevel, bar)
+  local levelOk, level = pcall(host.GetFrameLevel, host)
   if levelOk and tonumber(level) then
-    pcall(tick.SetFrameLevel, tick, level + 1)
+    pcall(tick.SetFrameLevel, tick, level + 5)
   end
   if tick.EnableMouse then tick:EnableMouse(false) end
 
