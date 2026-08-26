@@ -61,26 +61,34 @@ local function HookNamedPanels()
   end
   for i = 1, table.getn(LOOT_NAMES) do
     local frame = U.G(LOOT_NAMES[i])
-    if frame then U.KeepPanelInFront(frame, "HIGH") end
+    local strata = "HIGH"
+    -- Nameplates still draw over HIGH. The roll card uses FULLSCREEN_DIALOG
+    -- so the target plate cannot sit inside it.
+    if string.find(LOOT_NAMES[i], "GroupLootFrame", 1, true) then
+      strata = "FULLSCREEN_DIALOG"
+    end
+    if frame then U.KeepPanelInFront(frame, strata) end
   end
 end
 
 -- ---------------------------------------------------------------------------
 -- Loot roll windows
 --
--- These are left exactly as the client draws them -- no skin, no resize. The
--- only thing added is placement: the client opens them wherever it likes, which
--- on this client is the middle of the screen, and there was no way to move them
--- from Anchor Mode. They are hung off an invisible mover instead, stacked the
--- way the client stacks them, so the "Loot Roll" handle places all four.
+-- Placement only. The compact card (size, chrome, Need/Greed/Pass row) is
+-- modules/lootroll.lua -- this client's stock GroupLootFrame is a tall window
+-- whose GetWidth/GetHeight must not size the mover, or Anchor Mode draws a
+-- handle as tall as that native frame.
 --
--- The mover id is the one an earlier, since-removed skin used, so a position
--- saved back then is picked up rather than orphaned.
+-- Hung off an invisible mover, stacked the way the client stacks them, so the
+-- "Loot Roll" handle places all four. The mover id matches the one the earlier
+-- skin used, so a saved position is picked up rather than orphaned.
 -- ---------------------------------------------------------------------------
 local ROLL_FRAMES = {
   "GroupLootFrame1", "GroupLootFrame2", "GroupLootFrame3", "GroupLootFrame4",
 }
 local ROLL_GAP = 6
+local ROLL_MOVER_W = 300
+local ROLL_MOVER_H = 48
 local rollAnchor
 
 local function BuildRollAnchor()
@@ -88,18 +96,8 @@ local function BuildRollAnchor()
   if type(U.RegisterMover) ~= "function" then return nil end
 
   local frame = CreateFrame("Frame", "QtUiPlusLootRollAnchor", UIParent)
-  -- Sized from the stock frame so the Anchor Mode handle covers what actually
-  -- appears there; the fallback is the Vanilla template's own size.
-  local width, height = 330, 60
-  local first = U.G(ROLL_FRAMES[1])
-  if first then
-    local okW, value = pcall(first.GetWidth, first)
-    if okW and tonumber(value) and value > 1 then width = value end
-    local okH, other = pcall(first.GetHeight, first)
-    if okH and tonumber(other) and other > 1 then height = other end
-  end
-  frame:SetWidth(width)
-  frame:SetHeight(height)
+  frame:SetWidth(ROLL_MOVER_W)
+  frame:SetHeight(ROLL_MOVER_H)
   pcall(frame.EnableMouse, frame, false)
 
   U.RegisterMover("lootroll.anchor", frame, {
@@ -157,7 +155,11 @@ local function RaiseLoot()
   local i
   for i = 1, table.getn(LOOT_NAMES) do
     local frame = U.G(LOOT_NAMES[i])
-    if frame then U.RaiseGamePanel(frame, "HIGH") end
+    local strata = "HIGH"
+    if string.find(LOOT_NAMES[i], "GroupLootFrame", 1, true) then
+      strata = "FULLSCREEN_DIALOG"
+    end
+    if frame then U.RaiseGamePanel(frame, strata) end
   end
 end
 
@@ -185,8 +187,10 @@ function WM:OnEnable()
         if ok then name = value end
       end
       local strata = "DIALOG"
-      if name == "LootFrame" or (name and string.find(name, "GroupLootFrame", 1, true)) then
+      if name == "LootFrame" then
         strata = "HIGH"
+      elseif name and string.find(name, "GroupLootFrame", 1, true) then
+        strata = "FULLSCREEN_DIALOG"
       end
       U.KeepPanelInFront(frame, strata)
       U.RaiseGamePanel(frame, strata)

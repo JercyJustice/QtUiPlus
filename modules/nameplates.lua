@@ -287,6 +287,59 @@ local function IsNumericText(text)
   return tonumber(text) ~= nil
 end
 
+-- The roll card is a WorldFrame child on this client (count grows when a roll
+-- opens). ClassifyPlate then sees a StatusBar (the timer) plus a FontString
+-- (the item name) and adopts it as healthbar+name. BuildOverlay parents a
+-- QtUiPlus plate to that frame, so the bar moves with the card and paints
+-- FormatHealthText("target") -- USER_CONFIRMED_INGAME, not a world nameplate.
+-- Wiki GetName / GetParent: emberveil.org/wiki/lua/widgets/UIObject
+-- Wiki GetPoint relative name: emberveil.org/wiki/lua/widgets/Region#getpoint
+local function NameLooksLikeLootUi(name)
+  if type(name) ~= "string" then return false end
+  local lower = string.lower(name)
+  if string.find(lower, "grouploot", 1, true) then return true end
+  if string.find(lower, "lootframe", 1, true) then return true end
+  if string.find(lower, "lootroll", 1, true) then return true end
+  return false
+end
+
+local function HasLootRollChrome(frame)
+  local ok, kids = pcall(function() return { frame:GetChildren() } end)
+  if not ok or type(kids) ~= "table" then return false end
+  local i
+  for i = 1, table.getn(kids) do
+    local childName = Call(kids[i], "GetName")
+    if type(childName) == "string" then
+      local lower = string.lower(childName)
+      if string.find(lower, "greedbutton", 1, true) then return true end
+      if string.find(lower, "rollbutton", 1, true) then return true end
+      if string.find(lower, "needbutton", 1, true) then return true end
+      if string.find(lower, "passbutton", 1, true) then return true end
+    end
+  end
+  return false
+end
+
+local function IsLootUiPlate(frame)
+  if not frame then return false end
+  if NameLooksLikeLootUi(Call(frame, "GetName")) then return true end
+  if HasLootRollChrome(frame) then return true end
+
+  local parent = Call(frame, "GetParent")
+  local depth = 0
+  while parent and depth < 8 do
+    if NameLooksLikeLootUi(Call(parent, "GetName")) then return true end
+    parent = Call(parent, "GetParent")
+    depth = depth + 1
+  end
+
+  if type(frame.GetPoint) == "function" then
+    local ok, _, relName = pcall(frame.GetPoint, frame, 1)
+    if ok and NameLooksLikeLootUi(relName) then return true end
+  end
+  return false
+end
+
 -- Sorts a plate's regions and children into the parts QtUiPlus needs. Returns
 -- nil when the frame does not look like a nameplate at all.
 -- Work counters, same purpose as core/compat.lua's: this client has no
@@ -298,6 +351,7 @@ local statScans, statRescans, statClassified, statRefreshed = 0, 0, 0, 0
 
 local function ClassifyPlate(frame)
   statClassified = statClassified + 1
+  if IsLootUiPlate(frame) then return Reject("loot-ui") end
   -- The object type is recorded, not gated on. Measured: gating on
   -- Button/Frame plus "plates are anonymous" rejected all 28 WorldFrame
   -- children on this client -- and this runtime auto-names objects
@@ -567,7 +621,53 @@ local function ReadHealth(overlay)
   return nil
 end
 
-local function RefreshPlate(overlay)
+-- Screen rectangle. Wiki: emberveil.org/wiki/lua/widgets/Region#getleft
+-- (also GetRight / GetTop / GetBottom). Bottom-left origin, Y up.
+local function ScreenRect(object)
+  local left = tonumber(Call(object, "GetLeft"))
+  local right = tonumber(Call(object, "GetRight"))
+  local top = tonumber(Call(object, "GetTop"))
+  local bottom = tonumber(Call(object, "GetBottom"))
+  if not left or not right or not top or not bottom then return nil end
+  return { left = left, right = right, top = top, bottom = bottom }
+end
+
+local function RectsOverlap(a, b)
+  if not a or not b then return false end
+  if a.right <= b.left or a.left >= b.right then return false end
+  if a.top <= b.bottom or a.bottom >= b.top then return false end
+  return true
+end
+
+-- GroupLootFrame sits on UIParent. Nameplate overlays are WorldFrame children
+-- and draw over FULLSCREEN_DIALOG, so strata cannot cover this. A live target
+-- plate (fully opaque, "1.7k - 95%" / "Dead") is not caught by the gone-plate
+-- gate -- hide the overlay while it overlaps a shown roll card instead.
+local function CollectRollRects()
+  local rects = {}
+  local i
+  for i = 1, 4 do
+    local frame = U.G("GroupLootFrame" .. i)
+    if frame and Call(frame, "IsShown") then
+      local rect = ScreenRect(frame)
+      if rect then table.insert(rects, rect) end
+    end
+  end
+  return rects
+end
+
+local function OverlapsRoll(overlay, rollRects)
+  if not rollRects or table.getn(rollRects) == 0 then return false end
+  local rect = ScreenRect(overlay) or ScreenRect(overlay.plate)
+  if not rect then return false end
+  local i
+  for i = 1, table.getn(rollRects) do
+    if RectsOverlap(rect, rollRects[i]) then return true end
+  end
+  return false
+end
+
+local function RefreshPlate(overlay, rollRects)
   local parts = overlay.parts
   local plate = overlay.plate
 
@@ -588,9 +688,25 @@ local function RefreshPlate(overlay)
   -- fading non-target plates, so a plate faded all the way out is hidden as far
   -- as the player is concerned even though IsVisible still reports true. Only
   -- ~zero counts: a partly faded plate is a normal, live one.
+  --
+  -- A *live* target plate is fully opaque, so that gate never fires -- and
+  -- WorldFrame children paint over the roll card regardless of its strata.
+  -- Overlap with a shown GroupLootFrame is the other "gone" case.
+  -- Wiki Hide: emberveil.org/wiki/lua/widgets/Region#hide
+  -- Already-adopted roll-card overlays stay hidden. Rejecting in ClassifyPlate
+  -- only stops new ones; this client never forgets a plate once it is in
+  -- plateOrder.
+  if IsLootUiPlate(plate) then
+    if overlay.qtpVisible ~= false then
+      overlay.qtpVisible = false
+      pcall(overlay.Hide, overlay)
+    end
+    return
+  end
+
   local visible = Call(plate, "IsVisible")
   local plateAlpha = tonumber(Call(plate, "GetAlpha")) or 1
-  if not visible or plateAlpha <= 0.01 then
+  if not visible or plateAlpha <= 0.01 or OverlapsRoll(overlay, rollRects) then
     if overlay.qtpVisible ~= false then
       overlay.qtpVisible = false
       pcall(overlay.Hide, overlay)
@@ -732,11 +848,12 @@ end
 
 local function RefreshAll()
   statRefreshed = statRefreshed + 1
+  local rollRects = CollectRollRects()
   local i
   for i = 1, table.getn(plateOrder) do
     local overlay = plateOrder[i]
     if overlay then
-      local ok, err = pcall(RefreshPlate, overlay)
+      local ok, err = pcall(RefreshPlate, overlay, rollRects)
       if not ok then U.Debug("nameplate refresh: " .. tostring(err)) end
     end
   end

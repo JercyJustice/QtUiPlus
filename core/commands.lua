@@ -97,6 +97,7 @@ local function ShowHelp()
   U.Print("  |cffffff00/qtp elite|r - cycle the classification icon test")
   U.Print("  |cffffff00/qtp np|r - dump WorldFrame children (nameplates)")
   U.Print("  |cffffff00/qtp roll|r - dump the roll window to QtUiPlusDiagDB")
+  U.Print("  |cffffff00/qtp rolltest|r - simulate a loot roll (off to close)")
   U.Print("  |cffffff00/qtp aura|r - dump the aura rows and why a timer is missing")
   U.Print("  |cffffff00/qtp res|r - dump the Character sheet resistance frames")
   U.Print("  |cffffff00/qtp movertest|r - foundation mover smoke test")
@@ -1076,6 +1077,19 @@ local function ShowLootRollDump()
 end
 
 handlers["roll"] = function() ShowLootRollDump() end
+handlers["rolltest"] = function(rest)
+  if type(U.SimulateLootRoll) ~= "function" then
+    U.Print("rolltest unavailable - modules/lootroll.lua did not load")
+    return
+  end
+  rest = Trim(rest or "")
+  if rest == "off" or rest == "stop" or rest == "hide" then
+    U.StopLootRollSim()
+    U.Print("rolltest: closed")
+    return
+  end
+  U.SimulateLootRoll(tonumber(rest) or 1)
+end
 -- Live readout, printed straight to chat: an aura timer that does not appear
 -- has exactly three possible causes and modules/auras.lua's dump names the one
 -- responsible, per row and per index, without a reload or a probe run.
