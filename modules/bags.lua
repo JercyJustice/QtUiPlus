@@ -100,6 +100,8 @@ local bagDirty = {}
 local cooldownDirty = false
 local vendorDirty = false
 local keyringDirty = false
+local bagSlotDirty = false
+local bagSlotButtons = {}   -- bagSlotButtons[1..4] = equipped-bag CheckButton
 
 local pending    -- { items, index, mode = "sell"|"delete", startGold }
 
@@ -445,46 +447,104 @@ end
 -- Bag-slot tray
 --
 -- The four swappable equipped bag slots, so a bag can be dragged in or out
--- without the stock bag bar. WORKING_SOURCE recipe from UnrealPfUI's
--- CreateBagSlots: a CheckButton on BagSlotButtonTemplate, styled the same way
--- as an item slot. Unlike pfUI this also calls SetID with the inventory id the
--- stock template derives its bag from, since pfUI leaves it at the default.
+-- without the stock bag bar. Buttons stay on BagSlotButtonTemplate so click /
+-- drag / tooltip keep using PutItemInBag / PickupBagFromSlot /
+-- GameTooltip:SetInventoryItem with the inventory id (20-23).
+--
+-- The template's own OnLoad looks up GetInventorySlotInfo from the widget
+-- name (CharacterBag0Slot -> "Bag0Slot"). QtUiPlusBagBagSlotN is not that
+-- token, so the icon is never painted. Same as bank.lua: read
+-- GetInventoryItemTexture("player", 20-23) and SetItemButtonTexture.
+-- Wiki: emberveil.org/wiki/lua/globals/Inventory#getinventoryitemtexture
+--       emberveil.org/wiki/lua/globals/Container#containeridtoinventoryid
 -- ---------------------------------------------------------------------------
+-- Player bags: ContainerIDToInventoryID(bag) == bag + 19 (1 -> 20, 4 -> 23).
+local function BagSlotInventoryId(bag)
+  local ok, inventoryId = pcall(ContainerIDToInventoryID, bag)
+  if ok and tonumber(inventoryId) then return inventoryId end
+  bag = tonumber(bag)
+  if bag and bag >= 1 and bag <= 4 then return bag + 19 end
+  return nil
+end
+
+local function RefreshBagSlotButton(index)
+  local button = bagSlotButtons[index]
+  if not button then return end
+
+  local texture
+  local inventoryId = tonumber(button.qtpInv) or BagSlotInventoryId(index)
+  if inventoryId then
+    local texOk, value = pcall(GetInventoryItemTexture, "player", inventoryId)
+    if texOk and value and value ~= "" then texture = value end
+  end
+
+  pcall(SetItemButtonTexture, button, texture)
+
+  -- Named IconTexture is what StyleItemSlot already restyles. Set it
+  -- directly as well: SetItemButtonTexture is FrameXML, not a wiki C API.
+  local icon = U.G("QtUiPlusBagBagSlot" .. index .. "IconTexture")
+  if not icon then return end
+  if texture then
+    pcall(icon.SetTexture, icon, texture)
+    pcall(icon.Show, icon)
+    return
+  end
+
+  -- Equipped bag whose inventory texture was empty: Container API portrait.
+  -- Wiki: emberveil.org/wiki/lua/globals/Container#setbagportaittexture
+  local nOk, n = pcall(GetContainerNumSlots, index)
+  if nOk and tonumber(n) and n > 0 then
+    pcall(SetBagPortaitTexture, icon, index)
+    pcall(icon.Show, icon)
+  else
+    pcall(icon.Hide, icon)
+  end
+end
+
+local function RefreshBagSlots()
+  local i
+  for i = 1, BAG_SLOT_COUNT do RefreshBagSlotButton(i) end
+end
+
 local function LayoutBagSlots()
   if not frame or not frame.bagslots then return end
 
   local tray = frame.bagslots
-  if tray.built then return end
-  tray.built = true
+  if not tray.built then
+    tray.built = true
 
-  local i
-  for i = 1, BAG_SLOT_COUNT do
-    local name = "QtUiPlusBagBagSlot" .. i
-    local ok, button = pcall(CreateFrame, "CheckButton", name, tray,
-                             "BagSlotButtonTemplate")
-    if ok and button then
-      -- Container id i maps to the inventory slot the stock template reads.
-      local idOk, inventoryId = pcall(ContainerIDToInventoryID, i)
-      if idOk and tonumber(inventoryId) then
-        pcall(button.SetID, button, inventoryId)
+    local i
+    for i = 1, BAG_SLOT_COUNT do
+      local name = "QtUiPlusBagBagSlot" .. i
+      local ok, button = pcall(CreateFrame, "CheckButton", name, tray,
+                               "BagSlotButtonTemplate")
+      if ok and button then
+        local inventoryId = BagSlotInventoryId(i)
+        if inventoryId then
+          pcall(button.SetID, button, inventoryId)
+          button.qtpInv = inventoryId
+        end
+        button.slot = i
+        bagSlotButtons[i] = button
+
+        button:ClearAllPoints()
+        button:SetPoint("TOPLEFT", tray, "TOPLEFT",
+                        PADDING + (i - 1) * (TRAY_SLOT + SLOT_GAP), -PADDING)
+        button:SetWidth(TRAY_SLOT)
+        button:SetHeight(TRAY_SLOT)
+        U.StyleItemSlot(button, name)
+        button:Show()
+      else
+        U.Error("bags: BagSlotButtonTemplate unavailable; bag slot " .. i ..
+                " not created")
       end
-      button.slot = i
-
-      button:ClearAllPoints()
-      button:SetPoint("TOPLEFT", tray, "TOPLEFT",
-                      PADDING + (i - 1) * (TRAY_SLOT + SLOT_GAP), -PADDING)
-      button:SetWidth(TRAY_SLOT)
-      button:SetHeight(TRAY_SLOT)
-      U.StyleItemSlot(button, name)
-      button:Show()
-    else
-      U.Error("bags: BagSlotButtonTemplate unavailable; bag slot " .. i ..
-              " not created")
     end
+
+    tray:SetWidth(BAG_SLOT_COUNT * (TRAY_SLOT + SLOT_GAP) - SLOT_GAP + PADDING * 2)
+    tray:SetHeight(TRAY_SLOT + PADDING * 2)
   end
 
-  tray:SetWidth(BAG_SLOT_COUNT * (TRAY_SLOT + SLOT_GAP) - SLOT_GAP + PADDING * 2)
-  tray:SetHeight(TRAY_SLOT + PADDING * 2)
+  RefreshBagSlots()
 end
 
 -- ---------------------------------------------------------------------------
@@ -579,12 +639,18 @@ local function ProcessDirty()
     vendorDirty = false
     RefreshVendorButton()
   end
+
+  if bagSlotDirty then
+    bagSlotDirty = false
+    if frame.bagslots and frame.bagslots:IsShown() then RefreshBagSlots() end
+  end
 end
 
 local function MarkAllBagsDirty()
   local i
   for i = 1, table.getn(BAG_IDS) do bagDirty[BAG_IDS[i]] = true end
   keyringDirty = true
+  bagSlotDirty = true
 end
 
 -- ---------------------------------------------------------------------------
@@ -868,7 +934,10 @@ function BG:OnEnable()
   InstallToggleOverrides()
   Build()
 
-  U.RegisterEvent("PLAYER_ENTERING_WORLD", function() layoutDirty = true end)
+  U.RegisterEvent("PLAYER_ENTERING_WORLD", function()
+    layoutDirty = true
+    bagSlotDirty = true
+  end)
 
   U.RegisterEvent("BAG_UPDATE", function(event, bag)
     layoutDirty = true
@@ -876,6 +945,7 @@ function BG:OnEnable()
     if bag then bagDirty[bag] = true end
     if bag == KEYRING_BAG then keyringDirty = true end
     vendorDirty = true
+    bagSlotDirty = true
   end)
 
   U.RegisterEvent("ITEM_LOCK_CHANGED", MarkAllBagsDirty)
