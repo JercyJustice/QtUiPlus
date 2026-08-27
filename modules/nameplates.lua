@@ -551,6 +551,34 @@ end
 -- ---------------------------------------------------------------------------
 -- Overlay construction
 -- ---------------------------------------------------------------------------
+-- Wiki Frame#enablemouse: a mouse-enabled frame under the cursor receives
+-- mouse hits and, on this client, steals world mouseover (tooltip.lua notes
+-- the same flash). The overlay is parented to a WorldFrame plate that sits
+-- on the unit, so leaving mouse on -- overlay, children, or the native plate
+-- -- eats movement and action binds while hovering yourself or your target.
+-- pfUI vanilla nameplates EnableMouse(false) on both parent and overlay.
+local function DropPlateMouse(frame)
+  if not frame then return end
+  if frame.EnableMouse then pcall(frame.EnableMouse, frame, false) end
+  if frame.EnableKeyboard then pcall(frame.EnableKeyboard, frame, false) end
+end
+
+local function DropOverlayMouse(overlay)
+  if not overlay then return end
+  DropPlateMouse(overlay)
+  DropPlateMouse(overlay.plate)
+  DropPlateMouse(overlay.health)
+  DropPlateMouse(overlay.castbar)
+  DropPlateMouse(overlay.totem)
+  local i
+  if overlay.combopoints then
+    for i = 1, 5 do DropPlateMouse(overlay.combopoints[i]) end
+  end
+  if overlay.debuffs then
+    for i = 1, DEBUFF_MAX do DropPlateMouse(overlay.debuffs[i]) end
+  end
+end
+
 local LayoutOverlay
 
 local function BuildOverlay(frame, parts)
@@ -691,6 +719,7 @@ local function BuildOverlay(frame, parts)
   pcall(LayoutOverlay, overlay)
   overlay:Show()
   overlay.qtpVisible = true
+  DropOverlayMouse(overlay)
   return overlay
 end
 
@@ -831,6 +860,7 @@ local function AdoptPlate(frame)
   end
 
   MutePlateArt(parts)
+  DropPlateMouse(frame)
 
   registry[frame] = overlay
   table.insert(plateOrder, overlay)
@@ -956,6 +986,8 @@ end
 
 local function RefreshPlate(overlay, rollRects)
   local parts = overlay.parts
+  -- Native plates re-enable mouse on recycle; keep both sides click-through.
+  DropOverlayMouse(overlay)
   local plate = overlay.plate
 
   -- A plate that is gone must take its overlay with it.
