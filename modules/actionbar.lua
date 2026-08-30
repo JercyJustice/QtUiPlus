@@ -1083,9 +1083,12 @@ local function UpdateSlot(button)
     button.qtpTint = nil
   end
 
-  -- Counts: consumables report a stack, everything else reports nothing.
+  -- Counts: GetActionCount is both the test and the value. It reports zero for
+  -- spells, macros and empty slots, so no separate item check is needed --
+  -- and IsConsumableAction, which used to gate this, excludes valid stackable
+  -- items such as bandages and left them with no quantity at all.
   local count = ""
-  if cfg.showCount and Call("IsConsumableAction", slot) then
+  if cfg.showCount then
     local n = tonumber(Call("GetActionCount", slot))
     if n and n > 0 then count = tostring(n) end
   end
@@ -1294,8 +1297,12 @@ end
 -- own, so a slot sitting on a 30s cooldown still sweeps with the rest of the
 -- bar instead of showing nothing -- the global cooldown is a player state, not
 -- a per-slot one, and that is what the feedback is for.
-local function NoteGCD(start, duration)
+local function NoteGCD(slot, start, duration)
   if not (cfg and cfg.showGCD) then return end
+  -- A consumable's own cooldown is short enough to pass every test below, so
+  -- without this a potion or bandage sends the whole bar into the sweep. The
+  -- global cooldown is a player state; an item cooldown is not one.
+  if Call("IsConsumableAction", slot) then return end
   if start <= 0 or duration <= 0 or duration >= GCD_THRESHOLD then return end
   if gcdStart == start and gcdDuration == duration then return end
 
@@ -1331,7 +1338,7 @@ local function UpdateCooldown(button)
 
   -- enable == 0 is Vanilla's "this slot has a cooldown but must not display
   -- one" flag; a missing value is read as enabled, the way pfUI reads it.
-  if enable == nil or enable > 0 then NoteGCD(start, duration) end
+  if enable == nil or enable > 0 then NoteGCD(slot, start, duration) end
 
   button.qtpCdStart = start
   button.qtpCdDuration = duration

@@ -162,6 +162,9 @@ function U.CreateItemSlot(parent, name, bag, slot)
   button.slot = slot
   button.qtpBag = bag
   button.qtpSlot = slot
+  -- Defaulted here for a slot clicked before its first refresh; see the note on
+  -- button.count in U.UpdateItemSlot.
+  button.count = 0
   U.StyleItemSlot(button, name)
 
   -- ContainerFrame_UpdateCooldown resolves the cooldown by frame name. The
@@ -222,6 +225,16 @@ function U.UpdateItemSlot(button, bag, slot)
   pcall(SetItemButtonTexture, button, texture)
   pcall(SetItemButtonCount, button, count)
   pcall(SetItemButtonDesaturated, button, locked, 0.5, 0.5, 0.5)
+
+  -- The stock ContainerFrameItemButton_OnClick hands button.count to
+  -- OpenStackSplitFrame, which compares it against 2 with no nil guard
+  -- (StackSplitFrame.lua:8). SetItemButtonCount above is the only writer of
+  -- that field and has no compact record on this client, so a helper that is
+  -- missing or throws leaves it nil while the visible quantity still renders
+  -- from the separate count region -- and every shift-click errors. Assign it
+  -- from the same GetContainerItemInfo result so the field is populated
+  -- whether or not the helper works.
+  button.count = tonumber(count) or 0
 
   local color = U.ItemSlotBorderColor(bag, slot, texture, quality)
   U.SetBorderColor(button, color[1], color[2], color[3], color[4] or 1)
