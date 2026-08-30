@@ -213,7 +213,17 @@ end
 
 -- Is the native bar still sitting on our anchor, or has the client re-anchored
 -- it (a pet summon, a bar page change, a zone-in)?
+--
+-- The point count is checked first, and deliberately. A frame keeps every
+-- anchor set on it and is positioned by all of them at once, but GetPoint(1)
+-- reports only the first -- so a second point added after DriveNative's
+-- ClearAllPoints moves the bar while leaving point 1 still reading as ours.
+-- Testing point 1 alone cannot see that, and reports no drift for a bar that
+-- has visibly moved.
 local function NativeDrifted()
+  local okCount, count = pcall(native.GetNumPoints, native)
+  if okCount and tonumber(count) and tonumber(count) ~= 1 then return true end
+
   local point, relative, relativePoint, x, y = U.GetFramePoint(native, 1)
   if type(point) ~= "string" then return true end
   if relative ~= anchor then return true end
