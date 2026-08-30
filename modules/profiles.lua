@@ -39,12 +39,43 @@ local function BuildSettingsPage(parent)
   local Refresh
   local active
 
-  -- Applying a profile only fully takes hold on a reload: modules read
-  -- positions and module flags while they build. Say so rather than leaving a
-  -- half-applied layout looking like a failure.
-  local function Announce(verb, name)
+  -- Why every profile action offers an immediate reload
+  --
+  -- Switching a profile repoints U.db at the new table, but modules capture
+  -- their own settings table once in OnInit and keep that reference. After a
+  -- switch those two disagree, and the disagreement is not merely cosmetic:
+  -- settings pages that write through U.ModuleConfig resolve fresh and land in
+  -- the NEW profile, while the ones writing through a module cached cfg
+  -- (modules/nameplates.lua, modules/actionbar.lua and the other cachers) land
+  -- in the OLD one. Changing anything between the switch and the reload would
+  -- therefore split the change across two profiles.
+  --
+  -- Rebuilding every module on a live switch is the alternative, and it is a
+  -- much larger change than the feature warrants. Making the reload the
+  -- offered default closes the window instead.
+  local function PromptReload(verb, name)
     U.Print(verb .. " profile |cffffff00" .. name ..
-            "|r - |cffffff00/reload|r to apply it everywhere")
+            "|r - reload to apply it everywhere")
+
+    local function Reload()
+      local fn = U.G("ReloadUI")
+      if type(fn) == "function" then pcall(fn) end
+    end
+
+    if type(U.ShowConfirm) ~= "function" then
+      U.Print("run |cffffff00/reload|r before changing any more settings")
+      return
+    end
+
+    U.ShowConfirm({
+      owner = "profile-reload",
+      text = "Reload the UI now?",
+      detail = "The profile is only fully applied after a reload. Settings " ..
+               "changed before then can land in the previous profile.",
+      acceptText = "Reload",
+      cancelText = "Later",
+      onAccept = Reload,
+    })
   end
 
   active = U.CreateSettingsLabel(parent, {
@@ -83,7 +114,7 @@ local function BuildSettingsPage(parent)
     onClick = function()
       if type(U.ShowConfirm) ~= "function" then
         local ok, result = U.ResetCurrentProfile()
-        if ok then Announce("reset", result) end
+        if ok then PromptReload("reset", result) end
         if Refresh then Refresh() end
         return
       end
@@ -97,7 +128,7 @@ local function BuildSettingsPage(parent)
         onAccept = function()
           local ok, result = U.ResetCurrentProfile()
           if ok then
-            Announce("reset", result)
+            PromptReload("reset", result)
           else
             U.Print("could not reset: " .. tostring(result))
           end
@@ -132,7 +163,7 @@ local function BuildSettingsPage(parent)
         if not row.name then return end
         local ok, result = U.SelectProfile(row.name)
         if ok then
-          Announce("selected", result)
+          PromptReload("selected", result)
         else
           U.Print("could not select: " .. tostring(result))
         end
@@ -150,7 +181,7 @@ local function BuildSettingsPage(parent)
         if not row.name then return end
         local ok, result = U.CopyProfile(row.name)
         if ok then
-          Announce("copied " .. result .. " into", U.GetCurrentProfileName())
+          PromptReload("copied " .. result .. " into", U.GetCurrentProfileName())
         else
           U.Print("could not copy: " .. tostring(result))
         end

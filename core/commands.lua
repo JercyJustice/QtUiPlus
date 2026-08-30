@@ -1764,8 +1764,11 @@ handlers["profile"] = function(rest)
       -- Positions and module flags are read at build time by every module, so
       -- the applied profile only fully takes hold on a reload. Say so rather
       -- than leaving a half-applied layout looking like a failure.
+      -- Not just cosmetic: modules cache their settings table at OnInit, so
+      -- a setting changed between here and the reload can land in the profile
+      -- that was active before. modules/profiles.lua explains the split.
       U.Print("selected profile |cffffff00" .. result ..
-              "|r - |cffffff00/reload|r to apply it everywhere")
+              "|r - |cffffff00/reload|r before changing any more settings")
     else
       U.Print("could not select: " .. tostring(result))
     end
@@ -1776,7 +1779,8 @@ handlers["profile"] = function(rest)
     local ok, result = U.CopyProfile(name)
     if ok then
       U.Print("copied |cffffff00" .. result .. "|r into |cffffff00" ..
-              U.GetCurrentProfileName() .. "|r - |cffffff00/reload|r to apply")
+              U.GetCurrentProfileName() ..
+              "|r - |cffffff00/reload|r before changing any more settings")
     else
       U.Print("could not copy: " .. tostring(result))
     end
@@ -1797,7 +1801,7 @@ handlers["profile"] = function(rest)
     local ok, result = U.ResetCurrentProfile()
     if ok then
       U.Print("reset profile |cffffff00" .. result ..
-              "|r - |cffffff00/reload|r to apply it everywhere")
+              "|r - |cffffff00/reload|r before changing any more settings")
     else
       U.Print("could not reset: " .. tostring(result))
     end
