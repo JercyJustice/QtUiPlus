@@ -108,6 +108,7 @@ local function ShowHelp()
   U.Print("  |cffffff00/qtp frames <text>|r - find stock frames whose name contains <text>")
   U.Print("  |cffffff00/qtp price|r - why a vendor price is or is not on tooltips")
   U.Print("  |cffffff00/qtp profile|r - list, save, load or delete a layout profile")
+  U.Print("  |cffffff00/qtp theme|r - list or select the visual style")
 end
 
 -- Unit API readout.
@@ -1660,6 +1661,58 @@ handlers["price"] = function()
             "this again. Bag slots go through SetBagItem after SetOwner " ..
             "(ANCHOR_RIGHT); equipped items through SetInventoryItem.")
   end
+end
+
+-- ---------------------------------------------------------------------------
+-- Theme (core/theme.lua)
+--
+-- The settings window has the same selector, so this is not the primary route.
+-- It exists because a style that keeps the client's own chrome may not offer a
+-- QtUiPlus settings window at all, and a player who has ended up in one needs
+-- a way back that does not depend on that window being there.
+-- ---------------------------------------------------------------------------
+handlers["theme"] = function(rest)
+  if type(U.GetThemeStyles) ~= "function" then
+    U.Print("themes are unavailable")
+    return
+  end
+
+  local styles = U.GetThemeStyles()
+  local want = string.lower(Trim(rest or ""))
+
+  if want == "" then
+    U.Print("theme: |cffffff00" .. U.GetThemeStyleLabel(U.GetThemeStyle()) ..
+            "|r selected, |cffffff00" ..
+            U.GetThemeStyleLabel(U.GetActiveThemeStyle()) .. "|r loaded")
+    local i
+    for i = 1, table.getn(styles) do
+      local style = styles[i]
+      U.Print("  |cffffff00" .. style.id .. "|r  " .. style.label ..
+              (style.available and "" or "  |cffff5555(not available yet)|r"))
+    end
+    U.Print("  |cffffff00/qtp theme <id>|r to select one")
+    return
+  end
+
+  local i
+  for i = 1, table.getn(styles) do
+    local style = styles[i]
+    if string.lower(style.id) == want then
+      if not style.available then
+        U.Print("|cffff5555" .. style.label .. "|r is not available yet")
+        return
+      end
+      if U.SetThemeStyle(style.id) then
+        U.Print("theme set to |cffffff00" .. style.label ..
+                "|r - |cffffff00/reload|r to apply it")
+      else
+        U.Print("could not select " .. style.label)
+      end
+      return
+    end
+  end
+
+  U.Print("unknown theme |cffff5555" .. want .. "|r - |cffffff00/qtp theme|r lists them")
 end
 
 -- ---------------------------------------------------------------------------

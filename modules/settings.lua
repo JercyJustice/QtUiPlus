@@ -702,6 +702,17 @@ end
 -- that do not warrant a tab of their own. Anchor Mode and Quick Binding live
 -- in the window footer so they stay reachable from every page.
 -- ---------------------------------------------------------------------------
+-- A theme change only takes effect on the next reload: frames already built
+-- own tinted textures and font colours that swapping the token table would not
+-- revisit. Say so, but only while a change is actually pending.
+local function ThemeHintText()
+  if type(U.ThemeStyleRequiresReload) == "function" and
+     U.ThemeStyleRequiresReload() then
+    return "Reload the UI (/reload) to apply this theme."
+  end
+  return "Changes the look of QtUiPlus-owned frames."
+end
+
 local function BuildGeneralPage(parent)
   local widgets = {}
 
@@ -842,6 +853,54 @@ local function BuildGeneralPage(parent)
     table.insert(widgets, auraHint)
   end
 
+  -- Visual style (core/theme.lua). Right column, because the left one is full
+  -- down to the snap insets and this panel does not scroll.
+  --
+  -- Only styles that report themselves available are offered. A style still
+  -- being built stays in the list, labelled and unselectable, so the settings
+  -- window says what is coming instead of hiding it.
+  local themeSelect, themeHint
+  if type(U.GetThemeStyles) == "function" then
+    local styles, choices, i = U.GetThemeStyles(), {}, nil
+    for i = 1, table.getn(styles) do
+      local style = styles[i]
+      local label = style.label
+      if not style.available then label = label .. " (soon)" end
+      table.insert(choices, { key = style.id, label = label })
+    end
+
+    themeSelect = U.CreateSelect(parent, {
+      name = "QtUiPlusSettingsTheme",
+      text = "Theme",
+      width = 200,
+      values = choices,
+      value = U.GetThemeStyle(),
+      onChange = function(key)
+        -- U.SetThemeStyle refuses a style that is not available, so the
+        -- selection is put back to what is actually stored rather than left
+        -- showing a choice that did not take.
+        U.SetThemeStyle(key)
+        if themeSelect then themeSelect.SetValue(U.GetThemeStyle()) end
+        if themeHint then themeHint:SetText(ThemeHintText()) end
+      end,
+    })
+    themeSelect.SetPoint("TOPLEFT", parent, "TOPLEFT", 258, -110)
+    table.insert(widgets, themeSelect)
+
+    themeHint = U.CreateSettingsLabel(parent, {
+      size = M.fontSize.small,
+      color = M.color.textDim,
+      inherits = "GameFontNormalSmall",
+      justify = "LEFT",
+      width = 200,
+    })
+    if themeHint then
+      themeHint:SetPoint("TOPLEFT", parent, "TOPLEFT", 258, -136)
+      themeHint:SetText(ThemeHintText())
+      table.insert(widgets, themeHint)
+    end
+  end
+
   -- Grid pitch for edit mode (core/mover.lua). Lives here rather than on a
   -- page of its own: it is one slider, and it belongs with the Anchor Mode
   -- button that opens the mode it affects.
@@ -890,6 +949,8 @@ local function BuildGeneralPage(parent)
 
   local function Refresh()
     gridSlider.SetValue(U.GridSize())
+    if themeSelect then themeSelect.SetValue(U.GetThemeStyle()) end
+    if themeHint then themeHint:SetText(ThemeHintText()) end
     microbar.SetValue(U.ModuleConfig("microbar", { enabled = true }).enabled)
     reputation.SetValue(U.ModuleConfig("xpbar", { repEnabled = true }).repEnabled)
     minimapButton.SetValue(U.ModuleConfig("minimap", { enabled = true }).enabled)

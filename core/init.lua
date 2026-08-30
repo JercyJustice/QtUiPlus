@@ -402,6 +402,9 @@ local function Initialise()
   initialised = true
 
   U.LoadConfig()       -- core/config.lua
+  -- Before OnInit: modules read media tokens while they build, and a style
+  -- mutates those tokens in place.
+  if U.LoadThemeStyle then U.LoadThemeStyle() end   -- core/theme.lua
   RunModulePhase("OnInit")
   U.Debug("config loaded, modules initialised")
 end

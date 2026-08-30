@@ -10,6 +10,12 @@
 core\init.lua
 core\perf.lua
 core\media.lua
+
+# The theme registry and its styles load before core/style.lua, so the media
+# tokens a style mutates are final by the time any module builds UI from them.
+core\theme.lua
+themes\modern.lua
+themes\classic-wow.lua
 core\auradata.lua
 core\compat.lua
 core\config.lua

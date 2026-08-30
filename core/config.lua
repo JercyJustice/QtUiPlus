@@ -27,6 +27,10 @@ local VALID_POINTS = {
 local defaults = {
   version   = CONFIG_VERSION,
   debug     = false,
+  -- Visual style; see core/theme.lua. A change takes effect on the next
+  -- reload, because already-built frames own tinted textures and font colours
+  -- that swapping the token table alone would not revisit.
+  themeStyle = "modern",
   -- Diagnostic only, set by /qtp nosuppress. core/compat.lua's native-frame
   -- suppression is applied once at OnEnable and is irreversible within a
   -- session -- Show is replaced by a no-op whose original is not kept, and
