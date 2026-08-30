@@ -526,20 +526,20 @@ local function Build()
   })
   if panel.title then
     panel.title:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -14)
-    panel.title:SetText("Unreal")
+    panel.title:SetText("Qt")
     table.insert(panel.chrome, panel.title)
   end
 
-  panel.titleUI = U.CreateLabel(panel, {
+  panel.titleAccent = U.CreateLabel(panel, {
     size = M.fontSize.large,
     color = M.color.accent,
     inherits = "GameFontNormal",
     justify = "LEFT",
   })
-  if panel.titleUI then
-    panel.titleUI:SetPoint("LEFT", panel.title, "RIGHT", 4, 0)
-    panel.titleUI:SetText("UI")
-    table.insert(panel.chrome, panel.titleUI)
+  if panel.titleAccent then
+    panel.titleAccent:SetPoint("LEFT", panel.title, "RIGHT", 4, 0)
+    panel.titleAccent:SetText("UiPlus")
+    table.insert(panel.chrome, panel.titleAccent)
   end
 
   panel.version = U.CreateLabel(panel, {
@@ -548,7 +548,7 @@ local function Build()
     inherits = "GameFontNormalSmall",
   })
   if panel.version then
-    panel.version:SetPoint("LEFT", panel.titleUI or panel.title, "RIGHT", 8, -1)
+    panel.version:SetPoint("LEFT", panel.titleAccent or panel.title, "RIGHT", 8, -1)
     panel.version:SetText("v" .. U.version)
     table.insert(panel.chrome, panel.version)
   end
