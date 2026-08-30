@@ -1473,5 +1473,6 @@ local function BuildFrame()
 end
 
 function CH:OnEnable()
+  if U.ThemeStyleUsesNativeChrome() then return end
   BuildFrame()
 end

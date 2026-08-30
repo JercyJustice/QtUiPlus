@@ -808,6 +808,9 @@ function QL:OnInit()
 end
 
 function QL:OnEnable()
-  BuildFrame()
+  -- Only the window is ours to skip. RestoreTrackedQuests drives the
+  -- client quest-watch API and nothing in this module, so tracked quests
+  -- come back into the native tracker under Classic too.
+  if not U.ThemeStyleUsesNativeChrome() then BuildFrame() end
   BeginTrackingRestore()
 end

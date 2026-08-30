@@ -574,5 +574,6 @@ local function BuildFrame()
 end
 
 function FR:OnEnable()
+  if U.ThemeStyleUsesNativeChrome() then return end
   BuildFrame()
 end
