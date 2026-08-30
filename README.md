@@ -34,7 +34,8 @@ both *installed* is harmless — but having both *enabled* is not.
 | `/qtp unlock` / `/qtp lock` | Edit mode for moving frames |
 | `/qtp reset` | Reset all frame positions |
 | `/qtp bind` | Quick binding |
-| `/qtp profile list\|save\|load\|delete <name>` | Layout profiles |
+| `/qtp profile list\|create\|select\|copy\|delete\|reset <name>` | Layout profiles |
+| `/qtp theme <style>` | Visual style |
 | `/qtp check` | Runtime self-check |
 | `/qtp frames <text>` | Find stock frames by name and see which are still shown |
 | `/qtp debug` | Toggle debug output |
@@ -50,7 +51,9 @@ Everything QtUI had that the base did not:
 - **Vendor prices** — static sell-price database behind the auto-sell totals.
 - **Chat extras** — timestamps, class-coloured names, working mouse-wheel scrolling.
 - **Clock and bag space** — added to the existing status strip.
-- **Profiles** — named config snapshots that survive a resolution change.
+- **Profiles** — named, account-wide settings profiles. Each character
+  remembers which one it uses, so characters can share a layout or keep their
+  own, and a profile laid out at another resolution is rescaled on the way in.
 
 Cooldown text was *not* ported: the base already renders it on action buttons and
 auras, with colour tiers.
@@ -82,7 +85,7 @@ never gets a frame, a button or a mover built.
 `/qtp` opens the panel. Pages: General (incl. edit-mode grid size), Frame Sizes
 (Player / Target / Target of Target / Pet / Party), Unit Frames, Combo Points,
 Energy Tick, Experience Bar, Bags, Chat, Profiles, Extras, and the
-ActionBars group (General Options, Bar 1-10, Pet Bar, Stance Bar).
+ActionBars group (General Options, Bar 1-10, Stance Bar).
 
 ## Architecture notes
 

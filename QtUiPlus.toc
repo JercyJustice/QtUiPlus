@@ -5,7 +5,8 @@
 ## Version: 0.7.71
 ## X-License: MIT
 ## X-Credits: Based on UnrealUI by Tom75VN (MIT); features ported from QtUI by JercyJustice
-## SavedVariables: QtUiPlusDB, QtUiPlusDiagDB
+## SavedVariables: QtUiPlusDB, QtUiPlusDiagDB, QtUiPlusProfiles
+## SavedVariablesPerCharacter: QtUiPlusProfileDB
 
 core\init.lua
 core\perf.lua

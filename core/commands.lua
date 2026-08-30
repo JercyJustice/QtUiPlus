@@ -107,7 +107,7 @@ local function ShowHelp()
   U.Print("  |cffffff00/qtp debug|r - toggle debug output")
   U.Print("  |cffffff00/qtp frames <text>|r - find stock frames whose name contains <text>")
   U.Print("  |cffffff00/qtp price|r - why a vendor price is or is not on tooltips")
-  U.Print("  |cffffff00/qtp profile|r - list, save, load or delete a layout profile")
+  U.Print("  |cffffff00/qtp profile|r - list, create, select, copy or delete a profile")
   U.Print("  |cffffff00/qtp theme|r - list or select the visual style")
 end
 
@@ -1725,47 +1725,66 @@ handlers["profile"] = function(rest)
   local action, name = Split(Trim(rest or ""))
 
   if action == "" or action == "list" then
-    local names = QtP.ProfileNames()
+    U.Print("active profile: |cffffff00" .. U.GetCurrentProfileName() .. "|r")
+
+    local names = U.GetProfileNames(true)
     local count = table.getn(names)
     if count == 0 then
-      U.Print("no saved profiles - |cffffff00/qtp profile save <name>|r")
+      U.Print("  no other profiles - |cffffff00/qtp profile create <name>|r")
       return
     end
-    U.Print("saved profiles:")
+
     local i
     for i = 1, count do
-      U.Print("  |cffffff00" .. names[i] .. "|r")
+      local other = U.ProfileIsAssignedElsewhere(names[i])
+      U.Print("  |cffffff00" .. names[i] .. "|r" ..
+              (other and ("  (used by " .. other .. ")") or ""))
     end
-    U.Print("  |cffffff00/qtp profile load <name>|r to apply")
+    U.Print("  |cffffff00/qtp profile select <name>|r to switch this character")
     return
   end
 
-  if action == "save" then
-    local ok, result = QtP.SaveProfile(name)
+  if action == "create" then
+    -- The settings window Create button can only generate a name, because
+    -- focusing an addon-created EditBox crashes this client. This is the
+    -- supported route to a custom one: chat input is owned by the native UI.
+    local ok, result = U.CreateProfile(name, false)
     if ok then
-      U.Print("saved profile |cffffff00" .. result .. "|r")
+      U.Print("created profile |cffffff00" .. result ..
+              "|r - |cffffff00/qtp profile select " .. result .. "|r to use it")
     else
-      U.Print("could not save: " .. tostring(result))
+      U.Print("could not create: " .. tostring(result))
     end
     return
   end
 
-  if action == "load" then
-    local ok, result = QtP.LoadProfile(name)
+  if action == "select" or action == "load" then
+    local ok, result = U.SelectProfile(name)
     if ok then
       -- Positions and module flags are read at build time by every module, so
       -- the applied profile only fully takes hold on a reload. Say so rather
       -- than leaving a half-applied layout looking like a failure.
-      U.Print("loaded profile |cffffff00" .. result ..
+      U.Print("selected profile |cffffff00" .. result ..
               "|r - |cffffff00/reload|r to apply it everywhere")
     else
-      U.Print("could not load: " .. tostring(result))
+      U.Print("could not select: " .. tostring(result))
+    end
+    return
+  end
+
+  if action == "copy" then
+    local ok, result = U.CopyProfile(name)
+    if ok then
+      U.Print("copied |cffffff00" .. result .. "|r into |cffffff00" ..
+              U.GetCurrentProfileName() .. "|r - |cffffff00/reload|r to apply")
+    else
+      U.Print("could not copy: " .. tostring(result))
     end
     return
   end
 
   if action == "delete" then
-    local ok, result = QtP.DeleteProfile(name)
+    local ok, result = U.DeleteProfile(name)
     if ok then
       U.Print("deleted profile |cffffff00" .. result .. "|r")
     else
@@ -1774,7 +1793,18 @@ handlers["profile"] = function(rest)
     return
   end
 
-  U.Print("usage: |cffffff00/qtp profile list|save|load|delete <name>|r")
+  if action == "reset" then
+    local ok, result = U.ResetCurrentProfile()
+    if ok then
+      U.Print("reset profile |cffffff00" .. result ..
+              "|r - |cffffff00/reload|r to apply it everywhere")
+    else
+      U.Print("could not reset: " .. tostring(result))
+    end
+    return
+  end
+
+  U.Print("usage: |cffffff00/qtp profile list|create|select|copy|delete|reset <name>|r")
 end
 
 local function HandleCommand(message)

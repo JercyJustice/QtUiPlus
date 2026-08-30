@@ -21,25 +21,38 @@ local U = QtUiPlus
 local M = U.media
 
 QtP = {}
-QtPDB = nil   -- resolved against QtUiPlusDB.qt once SavedVariables have loaded
+QtPDB = nil   -- resolved against the active profile once the config has loaded
 
 -- ---------------------------------------------------------------------------
 -- Storage
 --
--- The ported settings live under QtUiPlusDB.qt rather than in the module store.
--- core/config.lua's SanitizeModules caps a module table at one level of nesting
--- and 200 entries; the QtUI layout nests deeper than that, so it would be
--- silently truncated on every load. A top-level key is left alone by
--- ApplyDefaults, which only walks keys present in its template.
+-- The ported settings are their own table rather than entries in the module
+-- store. core/config.lua caps a module table at one level of nesting and 200
+-- entries in SanitizeModules; the QtUI layout nests deeper than that, so it
+-- would be silently truncated on every load.
+--
+-- That table is the `qt` half of the active profile (core/config.lua), which is
+-- why this resolves through U.ProfileQtStore on every call rather than caching
+-- a reference: selecting another profile swaps the table underneath, and a
+-- holder of the old one would keep writing settings nobody reads. The
+-- QtUiPlusDB.qt fallback covers the window before the config has loaded, and
+-- the pre-profile saved files that still keep their layout there.
 --
 -- That same file's warning about SavedVariables backslash corruption still
 -- applies here: nothing below persists a media path. Paths are rebuilt at
 -- runtime from QtP.media and core/media.lua.
 -- ---------------------------------------------------------------------------
 local function EnsureDB()
-  if type(QtUiPlusDB) ~= "table" then QtUiPlusDB = {} end
-  if type(QtUiPlusDB.qt) ~= "table" then QtUiPlusDB.qt = {} end
-  QtPDB = QtUiPlusDB.qt
+  local store = nil
+  if type(U.ProfileQtStore) == "function" then store = U.ProfileQtStore() end
+
+  if type(store) ~= "table" then
+    if type(QtUiPlusDB) ~= "table" then QtUiPlusDB = {} end
+    if type(QtUiPlusDB.qt) ~= "table" then QtUiPlusDB.qt = {} end
+    store = QtUiPlusDB.qt
+  end
+
+  QtPDB = store
   return QtPDB
 end
 
@@ -381,7 +394,9 @@ end
 local layoutCache
 
 function QtP:GetLayout()
-  local db = QtPDB
+  -- EnsureDB rather than the QtPDB global: a profile switch replaces the store,
+  -- and the cache below is keyed on the table it came from.
+  local db = EnsureDB()
   if layoutCache and db and layoutCache == db.layout then return layoutCache end
   layoutCache = self:EnsureLayoutDefaults()
   return layoutCache
