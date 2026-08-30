@@ -429,6 +429,25 @@ local function ShowSelfCheck()
             " " .. tostring(m.x) .. "," .. tostring(m.y))
   end
 
+  -- The pet bar is the client's own frame with only a mover attached, so the
+  -- question when it is missing is always "who hid it". shown true / visible
+  -- false is the hidden-ancestor case modules/petbar.lua re-parents around;
+  -- shown false means the client itself has no bar to draw.
+  if type(U.PetBarReport) == "function" then
+    local pet = U.PetBarReport()
+    U.Print("  pet bar: frame " .. tostring(pet.native) ..
+            ", hasPetBar " .. tostring(pet.hasPetBar) ..
+            ", shown " .. tostring(pet.shown) ..
+            ", visible " .. tostring(pet.visible) ..
+            ", button visible " .. tostring(pet.buttonVisible))
+    U.Print("    parent " .. tostring(pet.parent) ..
+            " (was " .. tostring(pet.originalParent) ..
+            ", re-parented " .. tostring(pet.reparented) .. ")")
+    U.Print("    placed " .. tostring(pet.placed) ..
+            ", driven by mover " .. tostring(pet.driving) ..
+            ", native anchor captured " .. tostring(pet.nativeAnchorCaptured))
+  end
+
   if type(U.MicroBarReport) == "function" then
     local micro = U.MicroBarReport()
     U.Print("  micro bar: enabled " .. tostring(micro.enabled) ..

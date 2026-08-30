@@ -15,6 +15,10 @@ local M = U.media
 local movers = {}       -- id -> entry
 local moverOrder = {}
 local unlocked = false
+
+-- Callbacks run by U.ResetPositions after the position store has been cleared.
+-- See U.OnPositionReset for the case this exists for.
+local resetHooks = {}
 local selectedEntry
 local SelectEntry, PaintHandle, RefreshInfo, RefreshMoveList, ClampToInsets
 
@@ -1122,6 +1126,23 @@ function U.ToggleUI()
   if unlocked then U.LockUI() else U.UnlockUI() end
 end
 
+-- Called after /qtp reset has cleared the position store, so a callback can
+-- re-anchor its frame from scratch. Return true when a frame was restored, so
+-- it is counted in the same total the movers are.
+--
+-- This exists for frames whose default anchor cannot be expressed as a mover
+-- `default`, because it is not UIParent-relative: modules/petbar.lua places
+-- the client's own pet bar, whose native anchor is read at load and replayed
+-- from here.
+function U.OnPositionReset(callback)
+  if type(callback) ~= "function" then
+    U.Error("OnPositionReset requires a function")
+    return false
+  end
+  table.insert(resetHooks, callback)
+  return true
+end
+
 -- Drops every saved position and puts each registered frame back on its
 -- module-supplied default.
 function U.ResetPositions()
@@ -1131,6 +1152,17 @@ function U.ResetPositions()
   for i = 1, table.getn(moverOrder) do
     local entry = movers[moverOrder[i]]
     if ApplyStoredPosition(entry) then restored = restored + 1 end
+  end
+
+  -- Guarded individually: a module that errors while restoring its own frame
+  -- must not stop the rest of the reset it shares with every other mover.
+  for i = 1, table.getn(resetHooks) do
+    local ok, result = pcall(resetHooks[i])
+    if not ok then
+      U.Error("position reset hook: " .. tostring(result))
+    elseif result then
+      restored = restored + 1
+    end
   end
 
   U.Print("Reset " .. restored .. " frame position(s) to defaults.")

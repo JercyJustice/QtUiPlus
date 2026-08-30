@@ -517,7 +517,7 @@ function SB:OnInit()
   if type(U.RegisterSettingsTab) == "function" then
     U.RegisterSettingsTab("stancebar", "Stance Bar", BuildSettingsPage, {
       parent = "actionbars",
-      after = "petbar",
+      after = "actionbars.general",
     })
   end
 end

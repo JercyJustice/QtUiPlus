@@ -724,7 +724,11 @@ local COSMETIC_EARLY = {
   "PartyMemberFrame1", "PartyMemberFrame2", "PartyMemberFrame3", "PartyMemberFrame4",
   "MainMenuBar", "MainMenuBarArtFrame", "MainMenuExpBar", "ExhaustionTick",
   "ReputationWatchBar", "MainMenuBarMaxLevelBar",
-  "BonusActionBarFrame", "ShapeshiftBarFrame", "PetActionBarFrame",
+  -- PetActionBarFrame is deliberately absent: it is the only surface on this
+  -- client that can cast a pet spell (see modules/petbar.lua), so it is never
+  -- suppressed. That module re-parents it out of the hidden MainMenuBar
+  -- hierarchy instead.
+  "BonusActionBarFrame", "ShapeshiftBarFrame",
   "MultiBarBottomLeft", "MultiBarBottomRight", "MultiBarRight", "MultiBarLeft",
   "CastingBarFrame",
 }
