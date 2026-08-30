@@ -171,18 +171,24 @@ local function RegionNameOf(region)
   return nil
 end
 
-local function IsColorSwatchArt(region)
+local function RegionNameMatches(region, needle)
   local name = RegionNameOf(region)
   if not name then return false end
-  local lower = string.lower(name)
-  if string.find(lower, "colorswatch", 1, true) then return true end
-  if string.find(lower, "swatchbg", 1, true) then return true end
-  return false
+  return string.find(string.lower(name), needle, 1, true) and true or false
+end
+
+local function IsColorSwatchArt(region)
+  return RegionNameMatches(region, "colorswatch")
+      or RegionNameMatches(region, "swatchbg")
+end
+
+local function IsExpandArrowArt(region)
+  return RegionNameMatches(region, "expandarrow")
 end
 
 local function SuppressRegionArt(region)
   if not region or not region.GetObjectType then return end
-  if IsColorSwatchArt(region) then return end
+  if IsColorSwatchArt(region) or IsExpandArrowArt(region) then return end
   local typeOk, objectType = pcall(region.GetObjectType, region)
   if not typeOk or objectType ~= "Texture" then return end
   pcall(function() if region.SetAlpha then region:SetAlpha(0) end end)
@@ -191,15 +197,53 @@ end
 local function RestoreRegionArt(region)
   if not region then return end
   pcall(function() if region.SetAlpha then region:SetAlpha(1) end end)
-  pcall(function() if region.Show then region:Show() end end)
 end
 
--- Channel rows keep a color swatch on the right. Fading every row texture
--- left those as empty pink boxes and hid the join-check on the same pass.
-local function RestoreColorSwatch(listName, index)
+local function ObjectIsShown(object)
+  if not object or type(object.IsShown) ~= "function" then return false end
+  local ok, shown = pcall(object.IsShown, object)
+  return ok and shown and true or false
+end
+
+-- Channel rows and "Background" keep a ColorSwatch. Every list button has
+-- that child in the template, hidden unless UIDropDownMenu_AddButton set
+-- hasColorSwatch. Showing it on every row put empty pickers on Unlock /
+-- submenu arrows. Native Show/Hide is the contract; this only un-fades art
+-- on a swatch the client already opened, and hides it on arrow rows.
+local function SyncColorSwatch(listName, index)
   local prefix = listName .. "Button" .. index
+  local row = U.G(prefix)
   local swatch = U.G(prefix .. "ColorSwatch")
   if not swatch then return end
+
+  local arrow = U.G(prefix .. "ExpandArrow")
+  local isArrow = ObjectIsShown(arrow) or (row and row.hasArrow and true or false)
+  local wants = false
+  if row and not isArrow then
+    if row.hasColorSwatch then wants = true end
+    if type(row.swatchFunc) == "function" then wants = true end
+    -- Vanilla AddButton writes r/g/b on the row only for a real swatch.
+    if row.r ~= nil and row.g ~= nil and row.b ~= nil then wants = true end
+  end
+
+  -- The template puts a ColorSwatch on every button. Submenus never have
+  -- one. Do not Show() a hidden swatch -- that painted empty pickers on
+  -- Unlock / Font Size / Channels. A real colour row is already shown by
+  -- UIDropDownMenu_AddButton; only un-fade its art.
+  if isArrow then
+    pcall(swatch.Hide, swatch)
+    return
+  end
+  if not wants and not ObjectIsShown(swatch) then
+    return
+  end
+  if not wants then
+    -- Shown with no colour flags: leftover from forcing every swatch
+    -- visible. Hide it. Channel/Background rows set swatchFunc.
+    pcall(swatch.Hide, swatch)
+    return
+  end
+
   RestoreRegionArt(swatch)
   RestoreRegionArt(U.G(prefix .. "ColorSwatchSwatchBg"))
   if type(swatch.GetNormalTexture) == "function" then
@@ -285,7 +329,7 @@ local function StyleListRow(name, index, checkboxes)
   local text = U.G(name .. "Button" .. index .. "NormalText")
   if not text or not row then return end
 
-  RestoreColorSwatch(name, index)
+  SyncColorSwatch(name, index)
 
   -- Multi-select menus always show the column. Other menus (chat channels)
   -- still use the native Check shown-flag as "this row is ticked", so a joined

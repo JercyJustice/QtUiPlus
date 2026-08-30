@@ -5,10 +5,9 @@
 -- QtUI is a single flat addon: every module reaches for a handful of helpers on
 -- one global table. Rewriting those modules into the QtUiPlus registry idiom
 -- would mean re-deriving thousands of lines of behaviour that already work on
--- this client -- the damage meter alone is ~3400 lines. Instead the ported files
--- keep their original shape and call a `QtP` table that this file backs with
--- QtUiPlus internals. The surface is deliberately small, and it is the complete
--- set the ported modules actually use:
+-- this client. Instead the ported files keep their original shape and call a
+-- `QtP` table that this file backs with QtUiPlus internals. The surface is
+-- deliberately small, and it is the complete set the ported modules actually use:
 --
 --   QtP:Print / QtP.media / QtP:ApplyFont / QtP:PlaceAlignedText
 --   QtP:CreatePanel / QtP:GetLayout / QtP:EnsureLayoutDefaults
@@ -29,10 +28,9 @@ QtPDB = nil   -- resolved against QtUiPlusDB.qt once SavedVariables have loaded
 --
 -- The ported settings live under QtUiPlusDB.qt rather than in the module store.
 -- core/config.lua's SanitizeModules caps a module table at one level of nesting
--- and 200 entries; the QtUI layout nests deeper than that (per-window damage
--- meter config), so it would be silently truncated on every load. A top-level
--- key is left alone by ApplyDefaults, which only walks keys present in its
--- template.
+-- and 200 entries; the QtUI layout nests deeper than that, so it would be
+-- silently truncated on every load. A top-level key is left alone by
+-- ApplyDefaults, which only walks keys present in its template.
 --
 -- That same file's warning about SavedVariables backslash corruption still
 -- applies here: nothing below persists a media path. Paths are rebuilt at
@@ -51,10 +49,9 @@ function QtP:Print(message)
   U.Print(message)
 end
 
--- Adapted to the QtUiPlus look: QtUI filled its meter bars with the raised,
--- glossy native UI-StatusBar art. Every bar this addon draws uses the flat
--- plain texture instead, so a ported window reads as part of the same UI
--- rather than as a transplant from another one.
+-- Adapted to the QtUiPlus look: every bar this addon draws uses the flat
+-- plain texture, so a ported window reads as part of the same UI rather than
+-- as a transplant from another one.
 QtP.media = {
   statusbar = M.texture.plain,
 }
@@ -222,7 +219,7 @@ local function Paint(frame, fill, edge)
   end
 end
 
--- The base panel: meter windows, menus and popups.
+-- The base panel: menus and popups.
 function QtP.PaintPanel(frame)
   Paint(frame, M.color.background, M.color.border)
 end
@@ -272,7 +269,7 @@ function QtP.HoverListRow(frame)
   end
 end
 
--- Fully transparent, for the "hide meter background" option.
+-- Fully transparent, for hiding a panel background.
 function QtP.PaintClear(frame)
   if type(U.SetBackdropShown) == "function" then
     U.SetBackdropShown(frame, false)
@@ -325,11 +322,11 @@ end
 -- than porting MoveMode.lua alongside a mover that already does the job.
 -- Without this the ported windows are simply not draggable: the call sites
 -- guard with `if self.RegisterMovable then`, so a missing bridge fails silently
--- and the damage meter just sits where it was put.
+-- and the window just sits where it was put.
 function QtP:RegisterMovable(id, label, frame, default)
   if type(id) ~= "string" or not frame then return end
-  -- Rebind first: a meter window that was closed and re-added reuses its id
-  -- with a new frame object, and RegisterMover rejects a duplicate id.
+  -- Rebind first: a window that was closed and re-added reuses its id with a
+  -- new frame object, and RegisterMover rejects a duplicate id.
   if U.RebindMover(id, frame) then return end
   U.RegisterMover(id, frame, { label = label or id, default = default })
 end
@@ -378,14 +375,6 @@ function QtP:EnsureLayoutDefaults()
   Bool(layout, "chatClassNames", true)
   Bool(layout, "chatSocial", true)
 
-  Bool(layout, "meterShowBackground", true)
-  Bool(layout, "meterAskInstance", false)
-  Num(layout, "meterWidth", 190, 140, 400)
-  Num(layout, "meterBars", 8, 3, 16)
-  Num(layout, "meterBarHeight", 16, 12, 24)
-  Num(layout, "meterBarSpacing", 0, 0, 8)
-  if type(layout.meterWindows) ~= "table" then layout.meterWindows = {} end
-
   return layout
 end
 
@@ -404,7 +393,7 @@ end
 function QtP:IsFeatureEnabled(key)
   if type(key) ~= "string" then return true end
   if not U.db or type(U.db.modules) ~= "table" then return true end
-  -- Ported modules ask with QtUI's camelCase feature keys ("damageMeter")
+  -- Ported modules ask with QtUI's camelCase feature keys ("eqCompare")
   -- while module names are lowercase. Fold the case so both reach one flag.
   local entry = U.db.modules[string.lower(key)]
   if type(entry) ~= "table" then return true end

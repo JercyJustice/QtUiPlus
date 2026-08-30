@@ -35,7 +35,6 @@ both *installed* is harmless — but having both *enabled* is not.
 | `/qtp reset` | Reset all frame positions |
 | `/qtp bind` | Quick binding |
 | `/qtp profile list\|save\|load\|delete <name>` | Layout profiles |
-| `/qtp meter show\|hide\|add\|close` | Damage meter windows |
 | `/qtp check` | Runtime self-check |
 | `/qtp frames <text>` | Find stock frames by name and see which are still shown |
 | `/qtp debug` | Toggle debug output |
@@ -46,7 +45,6 @@ Everything QtUI had that the base did not:
 
 - **Auto loot** — empties corpses, containers and nodes; hold Shift to suppress.
 - **Auto-sell greys** — sells poor-quality items at a merchant and reports the total.
-- **Damage meter** — segmented damage/healing with per-fight drilldown.
 - **Equipped-item compare** — shows your equipped item beside an item tooltip.
 - **Creature health table** — real hit points for enemies reported as a percentage.
 - **Vendor prices** — static sell-price database behind the auto-sell totals.
@@ -83,25 +81,19 @@ never gets a frame, a button or a mover built.
 
 `/qtp` opens the panel. Pages: General (incl. edit-mode grid size), Frame Sizes
 (Player / Target / Target of Target / Pet / Party), Unit Frames, Combo Points,
-Energy Tick, Experience Bar, Bags, Chat, Damage Meter, Profiles, Extras, and the
+Energy Tick, Experience Bar, Bags, Chat, Profiles, Extras, and the
 ActionBars group (General Options, Bar 1-10, Pet Bar, Stance Bar).
 
 ## Architecture notes
 
 `core/qtcompat.lua` is the bridge. The ported QtUI modules keep their original
 shape and call a small `QtP` table backed by QtUiPlus internals, rather than being
-rewritten into the module registry — the damage meter alone is ~3400 lines of
-behaviour already proven on this client. The bridge surface is deliberately tiny:
+rewritten into the module registry. The bridge surface is deliberately tiny:
 `Print`, `media`, `ApplyFont`, `PlaceAlignedText`, `CreatePanel`, `GetLayout`,
 `EnsureLayoutDefaults`, `IsFeatureEnabled`.
 
 Ported settings live under `QtUiPlusDB.qt`, not in the per-module store, because
-`core/config.lua` caps a module's settings at one level of nesting and would
-flatten the damage meter's per-window config on every load.
-
-`modules/damagemeter.lua` sits at 199 top-level locals against Lua 5.1's cap of
-200. Anything added to that file must be a field on an existing table, not a new
-`local`.
+`core/config.lua` caps a module's settings at one level of nesting.
 
 ## Verification
 

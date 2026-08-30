@@ -108,7 +108,6 @@ local function ShowHelp()
   U.Print("  |cffffff00/qtp frames <text>|r - find stock frames whose name contains <text>")
   U.Print("  |cffffff00/qtp price|r - why a vendor price is or is not on tooltips")
   U.Print("  |cffffff00/qtp profile|r - list, save, load or delete a layout profile")
-  U.Print("  |cffffff00/qtp meter|r - show, hide, add or close a damage meter window")
 end
 
 -- Unit API readout.
@@ -1704,41 +1703,6 @@ handlers["profile"] = function(rest)
   end
 
   U.Print("usage: |cffffff00/qtp profile list|save|load|delete <name>|r")
-end
-
--- ---------------------------------------------------------------------------
--- Damage meter (modules/damagemeter.lua)
--- ---------------------------------------------------------------------------
-handlers["meter"] = function(rest)
-  local action = Split(Trim(rest or ""))
-
-  if type(QtP.SetupDamageMeter) ~= "function" then
-    U.Print("damage meter is not loaded")
-    return
-  end
-
-  if action == "show" or action == "" then
-    QtP:ShowDamageMeter()
-    U.Print("damage meter shown")
-  elseif action == "hide" then
-    QtP:HideDamageMeter()
-    U.Print("damage meter hidden")
-  elseif action == "add" then
-    -- No view argument, so the meter picks the next unused mode instead of
-    -- opening a duplicate of window 1.
-    local added = QtP:AddDamageMeterWindow()
-    if added then
-      U.Print("added a meter window (" .. tostring(QtP:MeterWindowCount()) .. " open)")
-    else
-      U.Print("could not add a window - the limit is reached, or the meter " ..
-              "has not been set up yet")
-    end
-  elseif action == "close" then
-    QtP:CloseLastDamageMeterWindow()
-    U.Print("closed a meter window (" .. tostring(QtP:MeterWindowCount()) .. " open)")
-  else
-    U.Print("usage: |cffffff00/qtp meter show|hide|add|close|r")
-  end
 end
 
 local function HandleCommand(message)

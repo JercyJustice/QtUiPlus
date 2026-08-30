@@ -52,10 +52,6 @@ M.texture = {
   restIcon = "Interface\\AddOns\\QtUiPlus\\media\\rest-icon",
   closeNormal = "Interface\\AddOns\\QtUiPlus\\media\\close_normal",
   closePushed = "Interface\\AddOns\\QtUiPlus\\media\\close_pushed",
-  meterReset = "Interface\\AddOns\\QtUiPlus\\media\\reset",
-  meterAnnounce = "Interface\\AddOns\\QtUiPlus\\media\\announce",
-  meterPlus = "Interface\\AddOns\\QtUiPlus\\media\\plus",
-  meterMinus = "Interface\\AddOns\\QtUiPlus\\media\\minus",
 }
 
 -- ---------------------------------------------------------------------------

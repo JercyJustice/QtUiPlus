@@ -46,26 +46,16 @@
 --     settled from a real fight. See knowledge.json /
 --     castbar.pushback_delay_event_unconfirmed.
 --
--- Scope this module still does not cover, and why:
---   * A target castbar. The only known implementation strategy (pfUI's) polls
---     UnitCastingInfo/UnitChannelInfo per unit, and that contract is
---     INCONCLUSIVE on this client. Left out until it is confirmed.
---
---     UnrealPfUI's libs/libcast.lua does not actually call a native
---     UnitCastingInfo/UnitChannelInfo -- on a Vanilla-shaped client neither
---     exists for non-player units, so libcast *defines* those two globals
---     itself. Its own cast data comes from two sources, neither of them a cast
---     API: player casts from the same SPELLCAST_* events this module already
---     reads, and non-player casts from regex-matching combat-log text (e.g.
---     "%s begins to cast %s.") off CHAT_MSG_SPELL_* events, looked up against
---     a static per-spell-name cast-time table (L["spells"]). query_compat.py
---     has no record at all for CHAT_MSG_SPELL or that combat-log phrasing, so
---     this fallback is exactly as unverified on this client as the native
---     tuple it would replace -- it is not a usable evidence-gap default here,
---     only a second thing that would need its own probe. A target castbar
---     mover anchor is registered below (castbar.target) so the frame can be
---     placed now; it carries no live cast data until one of these two paths
---     is confirmed.
+-- Target castbar follows UnrealPfUI's modules/castbar.lua OnUpdate, not
+-- UnrealUI (which never fed the target bar). Each tick:
+--   1. Poll UnitCastingInfo("target"), then UnitChannelInfo("target").
+--      Emberveil's player tuple is empty (pfUI: "prefer SPELLCAST_*"), but
+--      the same poll is what fills pfUI's target bar when the API answers.
+--   2. If the API is empty, use a combat-log cache (CHAT_MSG_SPELL_* +
+--      SPELLCASTOTHERSTART / SPELLPERFORMOTHERSTART), the same path as
+--      libs/libcast.lua. Durations come from spells we have already seen
+--      (player SPELLCAST_START and successful API polls), so a missing
+--      locale spell table does not invent a length.
 
 local U = QtUiPlus
 local M = U.media
@@ -106,6 +96,7 @@ local bar
 local casting = false
 local channeling = false
 local startTime, duration
+local lastCastName
 local lastTimeText
 local pendingCommit
 
@@ -514,6 +505,9 @@ end
 -- on every cast.
 -- ---------------------------------------------------------------------------
 local iconCache = {}
+-- Spell name (lower) -> cast time in milliseconds. Filled from the player's
+-- own SPELLCAST_* and from any UnitCastingInfo poll that returned times.
+local durationCache = {}
 
 local function ScanSpellbook(lowerName)
   local bookType = U.G("BOOKTYPE_SPELL") or "spell"
@@ -579,25 +573,34 @@ local function Relayout(widget)
                widget.qtpHeight or DEFAULT_HEIGHT)
 end
 
-local function ApplyIcon(name)
-  if not bar.icon then return end
+local function SetWidgetIcon(widget, name, textureHint)
+  if not widget or not widget.icon then return end
 
-  local texture = SpellIcon(name)
-  lastIconSource = texture and "spellbook" or "none"
+  local texture = textureHint
+  if type(texture) ~= "string" or texture == "" then
+    texture = SpellIcon(name)
+  end
+  if widget == bar then
+    lastIconSource = texture and (textureHint and "api" or "spellbook") or "none"
+  end
 
   local show = false
-  if texture and pcall(bar.icon.SetTexture, bar.icon, texture) then
+  if texture and pcall(widget.icon.SetTexture, widget.icon, texture) then
     show = true
-  elseif texture then
+  elseif texture and widget == bar then
     lastIconSource = "failed"
   end
 
-  if bar.showIcon ~= show then
-    bar.showIcon = show
-    Relayout(bar)
+  if widget.showIcon ~= show then
+    widget.showIcon = show
+    Relayout(widget)
   else
-    bar.showIcon = show
+    widget.showIcon = show
   end
+end
+
+local function ApplyIcon(name)
+  SetWidgetIcon(bar, name)
 end
 
 -- ---------------------------------------------------------------------------
@@ -640,18 +643,284 @@ local function SetCellsShown(shown)
   SetWidgetCellsShown(bar, shown)
 end
 
--- The target anchor carries no live cast state (see the header note), so its
--- only visibility rule is the edit lock: shown, with its idle placeholder,
--- while the UI is unlocked, and hidden otherwise.
-local function UpdateTargetVisibility()
+local function RememberDuration(name, seconds)
+  if type(name) ~= "string" or name == "" then return end
+  seconds = tonumber(seconds)
+  if not seconds or seconds <= 0.05 then return end
+  durationCache[string.lower(name)] = seconds * 1000
+end
+
+-- ---------------------------------------------------------------------------
+-- Target cast
+--
+-- pfUI modules/castbar.lua: poll UnitCastingInfo then UnitChannelInfo, then
+-- libcast.db[UnitName]. Combat-log rows only start a bar when we already
+-- know a duration for that spell name (player casts and API polls fill the
+-- cache), matching libcast's "unknown spell => ignore" rule without shipping
+-- pfUI's locale spell table.
+-- ---------------------------------------------------------------------------
+local combatCasts = {}
+local targetSource = "none"
+local CAST_PATTERNS, INTERRUPT_PATTERNS
+
+local function CompileChatPattern(globalName, fallback)
+  local raw = U.G(globalName)
+  if type(raw) ~= "string" or raw == "" then raw = fallback end
+  if type(raw) ~= "string" then return nil end
+  raw = string.gsub(raw, "%%s", "(.+)")
+  raw = string.gsub(raw, "%%d", "(%%d+)")
+  if string.sub(raw, -1) == "." then
+    raw = string.sub(raw, 1, -2) .. "%."
+  end
+  return "^" .. raw .. "$"
+end
+
+local function EnsureCastPatterns()
+  if CAST_PATTERNS then return end
+  CAST_PATTERNS = {
+    CompileChatPattern("SPELLCASTOTHERSTART", "%s begins to cast %s."),
+    CompileChatPattern("SPELLPERFORMOTHERSTART", "%s begins to perform %s."),
+    "^(.+) begins to cast (.+)%.$",
+    "^(.+) begins to perform (.+)%.$",
+    "^(.+) beginnt, (.+) zu wirken%.$",
+    "^(.+) beginnt, (.+) auszuführen%.$",
+  }
+  INTERRUPT_PATTERNS = {
+    CompileChatPattern("SPELLINTERRUPTSELFOTHER", "You interrupt %s's %s."),
+    CompileChatPattern("SPELLINTERRUPTOTHEROTHER", "%s interrupts %s's %s."),
+    "^You interrupt (.+)'s (.+)%.$",
+    "^(.+) interrupts (.+)'s (.+)%.$",
+    "^Ihr unterbrecht (.+)s (.+)%.$",
+  }
+end
+
+local function MatchTwo(msg, patterns)
+  local i
+  for i = 1, table.getn(patterns) do
+    local pat = patterns[i]
+    if pat then
+      local _, _, a, b = string.find(msg, pat)
+      if a and b then return a, b end
+    end
+  end
+  return nil
+end
+
+local function MatchInterrupt(msg)
+  local i
+  for i = 1, table.getn(INTERRUPT_PATTERNS) do
+    local pat = INTERRUPT_PATTERNS[i]
+    if pat then
+      local _, _, a, b, c = string.find(msg, pat)
+      -- self-interrupt: (mob, spell); other: (source, mob, spell)
+      if c then return b end
+      if a and b then return a end
+    end
+  end
+  return nil
+end
+
+local function CombatCastFor(unitName)
+  if type(unitName) ~= "string" or unitName == "" then return nil end
+  local row = combatCasts[string.lower(unitName)]
+  if not row then return nil end
+  if GetTime() >= row.start + row.duration then
+    combatCasts[string.lower(unitName)] = nil
+    return nil
+  end
+  return row
+end
+
+local function NoteCombatCast(mob, spell)
+  if type(mob) ~= "string" or type(spell) ~= "string" then return end
+  local ms = durationCache[string.lower(spell)]
+  if not ms then return end
+  combatCasts[string.lower(mob)] = {
+    name = spell,
+    start = GetTime(),
+    duration = ms / 1000,
+    channel = false,
+    texture = SpellIcon(spell),
+  }
+end
+
+local function ClearCombatCast(mob)
+  if type(mob) ~= "string" then return end
+  combatCasts[string.lower(mob)] = nil
+end
+
+local function OnCombatLog(event, msg)
+  if type(msg) ~= "string" or msg == "" then return end
+  EnsureCastPatterns()
+  local mob, spell = MatchTwo(msg, CAST_PATTERNS)
+  if mob and spell then
+    NoteCombatCast(mob, spell)
+    return
+  end
+  local interrupted = MatchInterrupt(msg)
+  if interrupted then ClearCombatCast(interrupted) end
+end
+
+local function ParseCastApi(a, b, c, d, e, f)
+  if type(a) ~= "string" or a == "" then return nil end
+  local startSec = tonumber(e) or tonumber(c)
+  local endSec = tonumber(f) or tonumber(d)
+  if not startSec or not endSec or endSec <= startSec then return nil end
+  local now = GetTime()
+  if endSec > now * 10 then
+    startSec = startSec / 1000
+    endSec = endSec / 1000
+  end
+  if endSec <= startSec or now > endSec + 0.15 then return nil end
+  local texture
+  if type(d) == "string" and string.find(d, "\\") then
+    texture = d
+  elseif type(c) == "string" and string.find(c, "\\") then
+    texture = c
+  end
+  return {
+    name = a,
+    start = startSec,
+    stop = endSec,
+    texture = texture,
+  }
+end
+
+local function CallCastApi(fnName, unit)
+  local fn = U.G(fnName)
+  if type(fn) ~= "function" or type(unit) ~= "string" or unit == "" then
+    return nil
+  end
+  local ok, a, b, c, d, e, f = pcall(fn, unit)
+  if not ok then return nil end
+  return ParseCastApi(a, b, c, d, e, f)
+end
+
+local function QueryUnitCast(unit)
+  if type(unit) ~= "string" or unit == "" then return nil, false end
+  if not Call("UnitExists", unit) then return nil, false end
+
+  if Call("UnitIsUnit", unit, "player") and casting and startTime and duration then
+    return {
+      name = lastCastName or "",
+      start = startTime,
+      stop = startTime + duration,
+      channel = channeling and true or false,
+    }, channeling and true or false
+  end
+
+  local queries = { unit }
+  local name = Call("UnitName", unit)
+  if type(name) == "string" and name ~= "" and name ~= unit then
+    table.insert(queries, name)
+  end
+  local existsFn = U.G("UnitExists")
+  if type(existsFn) == "function" then
+    local ok, _, guid = pcall(existsFn, unit)
+    if ok and type(guid) == "string" and guid ~= "" then
+      table.insert(queries, guid)
+    end
+  end
+
+  local i
+  for i = 1, table.getn(queries) do
+    local q = queries[i]
+    local info = CallCastApi("UnitCastingInfo", q)
+    if info then
+      info.channel = false
+      return info, false
+    end
+    info = CallCastApi("UnitChannelInfo", q)
+    if info then
+      info.channel = true
+      return info, true
+    end
+  end
+
+  local row = CombatCastFor(name)
+  if row then
+    return {
+      name = row.name,
+      start = row.start,
+      stop = row.start + row.duration,
+      texture = row.texture,
+      channel = row.channel and true or false,
+    }, row.channel and true or false
+  end
+  return nil, false
+end
+
+local function ApplyWidgetTimer(widget, remaining)
+  if not widget or not widget.time then return end
+  local text = string.format("%.1f", remaining)
+  if widget.qtpLastTimeText == text then return end
+  widget.qtpLastTimeText = text
+  widget.time:SetText(text)
+end
+
+local function PaintTargetIdle()
   if not targetBar then return end
-  local shown = U.IsUnlocked()
-  if shown then
+  U.SetStatusBarColor(targetBar.bar, M.Unpack(M.color.cast))
+  pcall(targetBar.bar.SetMinMaxValues, targetBar.bar, 0, 1)
+  pcall(targetBar.bar.SetValue, targetBar.bar, 0.4)
+  if targetBar.name then targetBar.name:SetText("Target cast bar") end
+  if targetBar.icon then
+    pcall(targetBar.icon.SetTexture, targetBar.icon, FALLBACK_ICON)
+  end
+  if targetBar.showIcon ~= true then
+    targetBar.showIcon = true
+    Relayout(targetBar)
+  else
+    targetBar.showIcon = true
+  end
+  targetBar.qtpLastTimeText = nil
+  if targetBar.time then targetBar.time:SetText("0.0") end
+  targetSource = "idle"
+end
+
+local function PaintTargetCast(info)
+  if not targetBar or not info then return end
+  local duration = info.stop - info.start
+  if duration <= 0 then duration = 0.01 end
+  local elapsed = GetTime() - info.start
+  if elapsed < 0 then elapsed = 0 end
+  if elapsed > duration then elapsed = duration end
+  local remaining = duration - elapsed
+
+  RememberDuration(info.name, duration)
+  U.SetStatusBarColor(targetBar.bar, M.Unpack(M.color.cast))
+  pcall(targetBar.bar.SetMinMaxValues, targetBar.bar, 0, duration)
+  if info.channel then
+    pcall(targetBar.bar.SetValue, targetBar.bar, remaining)
+  else
+    pcall(targetBar.bar.SetValue, targetBar.bar, elapsed)
+  end
+  if targetBar.name then targetBar.name:SetText(tostring(info.name or "")) end
+  SetWidgetIcon(targetBar, info.name, info.texture)
+  ApplyWidgetTimer(targetBar, remaining)
+end
+
+local function TickTarget()
+  if not targetBar then return end
+
+  local info = QueryUnitCast("target")
+  if info then
+    targetSource = info.channel and "channel" or "cast"
+    PaintTargetCast(info)
     if not targetBar:IsShown() then targetBar:Show() end
+    SetWidgetCellsShown(targetBar, true)
+    return
+  end
+
+  targetSource = "none"
+  if U.IsUnlocked and U.IsUnlocked() then
+    PaintTargetIdle()
+    if not targetBar:IsShown() then targetBar:Show() end
+    SetWidgetCellsShown(targetBar, true)
   else
     if targetBar:IsShown() then targetBar:Hide() end
+    SetWidgetCellsShown(targetBar, false)
   end
-  SetWidgetCellsShown(targetBar, shown)
 end
 
 -- Kept shown and given a placeholder fill while the UI is unlocked, on the
@@ -702,6 +971,8 @@ local function StartCast(name, castTimeMs, isChannel)
   channeling = isChannel and true or false
   startTime = GetTime()
   duration = DurationSeconds(castTimeMs)
+  lastCastName = tostring(name or "")
+  RememberDuration(lastCastName, duration)
 
   delayCount, delaySeconds = 0, 0
 
@@ -776,7 +1047,7 @@ local function Tick()
 
   FlushPendingCommit()
   UpdateVisibility()
-  UpdateTargetVisibility()
+  TickTarget()
   UpdateResizeGrips()
   -- Native bar Show() is often ignored mid-event; keep punching whenever
   -- the stock frame is actually on screen, not only while we think we
@@ -917,11 +1188,8 @@ local function Build()
   })
   AttachResizeGrip(bar, "player", "castbar.player")
 
-  -- Anchor-only target castbar (see the header note): built the same way as
-  -- the player bar so its placeholder matches, but nothing ever calls
-  -- StartCast/StopCast on it. It is shown only while the UI is unlocked, on
-  -- the same reasoning as the player bar's idle placeholder -- a frame that
-  -- only exists once it has data could never be dragged into place.
+  -- Target bar: same cells as the player bar. Live data comes from
+  -- TickTarget (UnitCastingInfo poll, then combat-log cache).
   targetBar = BuildBarWidget("QtUiPlusCastBarTarget")
   ApplyStoredSize(targetBar, "target")
   U.SetStatusBarColor(targetBar.bar, M.Unpack(M.color.cast))
@@ -986,6 +1254,28 @@ function CB:OnEnable()
 
   U.RegisterEvent("SPELLCAST_CHANNEL_STOP", StopCast)
 
+  U.RegisterEvent("PLAYER_TARGET_CHANGED", function()
+    TickTarget()
+  end)
+
+  local combatEvents = {
+    "CHAT_MSG_SPELL_CREATURE_VS_CREATURE_BUFF",
+    "CHAT_MSG_SPELL_CREATURE_VS_CREATURE_DAMAGE",
+    "CHAT_MSG_SPELL_HOSTILEPLAYER_BUFF",
+    "CHAT_MSG_SPELL_HOSTILEPLAYER_DAMAGE",
+    "CHAT_MSG_SPELL_FRIENDLYPLAYER_BUFF",
+    "CHAT_MSG_SPELL_FRIENDLYPLAYER_DAMAGE",
+    "CHAT_MSG_SPELL_PERIODIC_CREATURE_BUFFS",
+    "CHAT_MSG_SPELL_PARTY_BUFF",
+    "CHAT_MSG_SPELL_SELF_DAMAGE",
+    "CHAT_MSG_MONSTER_EMOTE",
+    "CHAT_MSG_MONSTER_SAY",
+  }
+  local n
+  for n = 1, table.getn(combatEvents) do
+    U.RegisterEvent(combatEvents[n], OnCombatLog)
+  end
+
   -- Same invalidation UnrealPfUI's libspell uses: a newly learned rank changes
   -- which spellbook index a name resolves to.
   U.RegisterEvent("LEARNED_SPELL_IN_TAB", function()
@@ -1008,6 +1298,8 @@ function U.CastbarReport()
   if not bar then return nil end
 
   local shownOk, shown = pcall(bar.IsShown, bar)
+  local tOk, tShown = false, nil
+  if targetBar then tOk, tShown = pcall(targetBar.IsShown, targetBar) end
   return {
     casting = casting,
     channeling = channeling,
@@ -1018,5 +1310,7 @@ function U.CastbarReport()
     delays = delayCount,
     delaySeconds = delaySeconds,
     nativeSuppressed = nativeCastbarSuppressed,
+    targetShown = tOk and tShown or "?",
+    targetSource = targetSource,
   }
 end

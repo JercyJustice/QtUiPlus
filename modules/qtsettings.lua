@@ -8,8 +8,7 @@
 --
 -- Every toggle writes to the shared QtUI layout table in core/qtcompat.lua,
 -- not to a per-module store, because that is the table the ported modules
--- read. The damage meter is the exception: it is gated on the module enable
--- flag, which is what its own OnEnable checks.
+-- read.
 
 local U = QtUiPlus
 local M = U.media
@@ -198,49 +197,14 @@ local function BuildPage(parent)
                   "already reports real values.",
   })
 
-  -- The damage meter is gated on the module flag rather than a layout key,
-  -- because that is what modules/damagemeter.lua checks in its OnEnable.
-  local meter = U.CreateCheckbox(parent, {
-    name = "QtUiPlusQtSettingsDamageMeter",
-    text = "Damage meter",
-    value = U.ModuleConfig("damagemeter", { enabled = true }).enabled,
-    onChange = function(value)
-      U.ModuleConfig("damagemeter", { enabled = true }).enabled = value
-      if value then
-        if type(QtP.SetupDamageMeter) == "function" then QtP:SetupDamageMeter() end
-      elseif type(QtP.HideDamageMeter) == "function" then
-        QtP:HideDamageMeter()
-      end
-    end,
-  })
-  meter.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, ROW_START - 11 * ROW_STEP)
-  table.insert(widgets, meter)
-  boxes.damageMeter = meter
-
-  local meterHint = U.CreateSettingsLabel(parent, {
-    size = M.fontSize.small,
-    color = M.color.textDim,
-    inherits = "GameFontNormalSmall",
-    justify = "LEFT",
-  })
-  if meterHint then
-    U.AnchorSettingsDescription(meterHint, meter.box)
-    meterHint:SetText("Segmented damage and healing meter. " ..
-                      "|cffffff00/qtp meter add|r opens another window.")
-    table.insert(widgets, meterHint)
-  end
-
   -- Re-read every value when the page is shown again: a slash command or the
   -- clock's own click handler can change these behind the panel's back.
   local function Refresh()
     local layout = QtP:GetLayout()
     local key, box
     for key, box in pairs(boxes) do
-      if key ~= "damageMeter" then
-        box.SetValue(layout[key] ~= false)
-      end
+      box.SetValue(layout[key] ~= false)
     end
-    boxes.damageMeter.SetValue(U.ModuleConfig("damagemeter", { enabled = true }).enabled)
     unshift.SetValue(GetUnshift())
     if type(U.GetStatusOverlayFontSize) == "function" then
       fontSlider.SetValue(U.GetStatusOverlayFontSize())
@@ -250,171 +214,6 @@ local function BuildPage(parent)
   return widgets, Refresh
 end
 
--- ---------------------------------------------------------------------------
--- Damage meter page
---
--- The meter reads these straight off the QtUI layout table on its next layout
--- pass, so a change only needs QtP:ApplyDamageMeterLayout() to be visible --
--- there is no separate state to keep in step.
--- ---------------------------------------------------------------------------
-local METER_LIMITS = {
-  meterWidth      = { min = 140, max = 400, step = 5 },
-  meterBars       = { min = 3,   max = 16,  step = 1 },
-  meterBarHeight  = { min = 12,  max = 24,  step = 1 },
-  meterBarSpacing = { min = 0,   max = 8,   step = 1 },
-}
-
-local METER_SLIDERS = {
-  { key = "meterWidth",      text = "Window Width" },
-  { key = "meterBars",       text = "Visible Bars" },
-  { key = "meterBarHeight",  text = "Bar Height" },
-  { key = "meterBarSpacing", text = "Bar Spacing" },
-}
-
-local function ApplyMeter()
-  if type(QtP.ApplyDamageMeterLayout) == "function" then
-    QtP:ApplyDamageMeterLayout()
-  end
-end
-
-local function SetMeter(key, value)
-  local layout = QtP:GetLayout()
-  local limit = METER_LIMITS[key]
-  if limit then
-    value = U.Round(tonumber(value) or limit.min)
-    if value < limit.min then value = limit.min end
-    if value > limit.max then value = limit.max end
-  end
-  layout[key] = value
-  ApplyMeter()
-end
-
-local function BuildMeterPage(parent)
-  local widgets, controls = {}, {}
-
-  local header = U.CreateSectionHeader(parent, {
-    text = "Damage Meter", width = 484, y = -4,
-  })
-  table.insert(widgets, header)
-
-  local layout = QtP:GetLayout()
-
-  local background = U.CreateCheckbox(parent, {
-    name = "QtUiPlusMeterBackground",
-    text = "Show window background",
-    value = layout.meterShowBackground ~= false,
-    onChange = function(value)
-      QtP:GetLayout().meterShowBackground = value and true or false
-      ApplyMeter()
-    end,
-  })
-  background.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -34)
-  table.insert(widgets, background)
-
-  local askInstance = U.CreateCheckbox(parent, {
-    name = "QtUiPlusMeterAskInstance",
-    text = "Ask to reset on entering an instance",
-    value = layout.meterAskInstance == true,
-    onChange = function(value)
-      QtP:GetLayout().meterAskInstance = value and true or false
-    end,
-  })
-  askInstance.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -58)
-  table.insert(widgets, askInstance)
-
-  local i
-  for i = 1, table.getn(METER_SLIDERS) do
-    local spec = METER_SLIDERS[i]
-    local limit = METER_LIMITS[spec.key]
-    local slider = U.CreateSlider(parent, {
-      name = "QtUiPlus" .. spec.key,
-      text = spec.text,
-      width = 200,
-      min = limit.min, max = limit.max, step = limit.step,
-      value = QtP:GetLayout()[spec.key],
-      onChange = function(value) SetMeter(spec.key, value) end,
-    })
-    slider.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -102 - (i - 1) * 44)
-    controls[spec.key] = slider
-    table.insert(widgets, slider)
-  end
-
-  -- Window add/close. QtUI put these in its own settings window, which was not
-  -- ported, so until now /qtp meter add was the only way to open a second
-  -- window and there was no way to discover it.
-  local countLabel = U.CreateSettingsLabel(parent, {
-    size = M.fontSize.normal, color = M.color.text,
-    inherits = "GameFontNormal", justify = "LEFT",
-  })
-
-  local UpdateCount
-  UpdateCount = function()
-    if not countLabel then return end
-    local n = 0
-    if type(QtP.MeterWindowCount) == "function" then
-      n = tonumber(QtP:MeterWindowCount()) or 0
-    end
-    countLabel:SetText("Open windows: |cffffff00" .. n .. "|r")
-  end
-
-  local addButton = U.CreateButton(parent, {
-    name = "QtUiPlusMeterAdd",
-    text = "Add window",
-    width = 140, height = 26,
-    onClick = function()
-      if type(QtP.AddDamageMeterWindow) ~= "function" then
-        U.Print("damage meter is not loaded")
-        return
-      end
-      -- No view argument: the meter then picks the next unused mode, so a new
-      -- window shows something different from the ones already open rather
-      -- than a duplicate of window 1.
-      local frame = QtP:AddDamageMeterWindow()
-      if not frame then
-        U.Print("cannot add another meter window (limit reached, or the " ..
-                "meter is disabled)")
-      end
-      UpdateCount()
-    end,
-  })
-  addButton:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -290)
-  table.insert(widgets, addButton)
-
-  local closeButton = U.CreateButton(parent, {
-    name = "QtUiPlusMeterClose",
-    text = "Close window",
-    width = 140, height = 26,
-    onClick = function()
-      if type(QtP.CloseLastDamageMeterWindow) == "function" then
-        QtP:CloseLastDamageMeterWindow()
-      end
-      UpdateCount()
-    end,
-  })
-  closeButton:SetPoint("TOPLEFT", parent, "TOPLEFT", 150, -290)
-  table.insert(widgets, closeButton)
-
-  if countLabel then
-    countLabel:SetPoint("TOPLEFT", parent, "TOPLEFT", 300, -297)
-    table.insert(widgets, countLabel)
-  end
-
-  local function Refresh()
-    UpdateCount()
-    local current = QtP:GetLayout()
-    background.SetValue(current.meterShowBackground ~= false)
-    askInstance.SetValue(current.meterAskInstance == true)
-    local j
-    for j = 1, table.getn(METER_SLIDERS) do
-      local key = METER_SLIDERS[j].key
-      if controls[key] then controls[key].SetValue(current[key]) end
-    end
-  end
-
-  return widgets, Refresh
-end
-
 function Q:OnInit()
   U.RegisterSettingsTab("qtextras", "Extras", BuildPage)
-  U.RegisterSettingsTab("damagemeter", "Damage Meter", BuildMeterPage)
 end

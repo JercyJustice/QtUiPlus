@@ -995,8 +995,8 @@ end
 --            visible = function() return true end }
 -- Re-points an existing mover at a different frame.
 --
--- A window that can be closed and re-opened reuses its id (the damage meter
--- does exactly this), but the frame behind that id is a new object each time.
+-- A window that can be closed and re-opened reuses its id, but the frame
+-- behind that id is a new object each time.
 -- Without a rebind, RegisterMover rejects the duplicate id and the mover keeps
 -- driving a frame the player can no longer see, so the new window is
 -- unmovable. Returns false for an id that was never registered, so callers can
