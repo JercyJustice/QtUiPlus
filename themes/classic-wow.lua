@@ -1,34 +1,38 @@
 -- QtUiPlus :: themes/classic-wow.lua
 --
--- Registration only. Classic WoW keeps the client's own chrome on stock
--- windows while every QtUiPlus module stays fully enabled -- it is a visual
--- style, never an addon-off switch.
+-- Classic WoW keeps the client's own chrome on stock windows while every
+-- QtUiPlus module stays fully enabled -- it is a visual style, never an
+-- addon-off switch.
 --
--- `available = false` because none of that exists here yet. The entry is
--- registered rather than omitted so the settings list shows what is coming and
--- the id is reserved; U.GetThemeStyle refuses to resolve to an unavailable
--- style, so selecting it is impossible until the implementation lands.
+-- Built in stages. Stage 1 is what "native chrome" means today: every module
+-- that skins a client window bails out of its build step when
+-- U.ThemeStyleUsesNativeChrome() is true, which skips the skinning *and* the
+-- suppression, so the client draws its own merchant, mail, trainer, gossip,
+-- spellbook, quest log, quest, character and friends windows, its own
+-- confirmation popups and its own casting bar. QtUiPlus movers and the whole
+-- feature set stay underneath.
 --
--- What "available" will require, roughly in the order the surfaces matter:
+-- Still on the Modern treatment, and openly a mixed look until they land:
 --
+--   * action and stance buttons drawing the live client's own button faces,
+--     read before the stock bars are suppressed
+--   * the merged bag window painted from the live ContainerFrame textures,
+--     together with core/itemslot.lua keeping the native slot art
+--   * the game menu
 --   * unit frames keeping the QtUiPlus frames as invisible layout anchors with
 --     the client's own frames shown on top, so saved mover positions, aura
 --     attachment points and the refresh contract all survive
---   * action and stance buttons drawing the live client's own button faces,
---     read before core/compat.lua suppresses the stock bars
---   * the merged bag window painted from the live ContainerFrame textures
---   * every module that skins a native window bailing out of its build step
---     when U.ThemeStyleUsesNativeChrome() is true
 --
--- The palette below is the Classic side of the token contract themes/modern.lua
--- states, and is applied only once this style becomes selectable.
+-- The palette below is the Classic side of the token contract
+-- themes/modern.lua states. In stage 1 the QtUiPlus unit frames are still the
+-- visible ones, so it tints those too -- addon-owned surfaces take the Classic
+-- palette rather than being left on Modern colours.
 
 local U = QtUiPlus
 
 U.RegisterThemeStyle("classic-wow", {
   label = "Classic WoW",
-  available = false,
-  wip = true,
+  available = true,
   nativeChrome = true,
   apply = function(M)
     M.color.background[1], M.color.background[2] = 0.12, 0.075

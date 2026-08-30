@@ -733,11 +733,36 @@ local COSMETIC_EARLY = {
   "CastingBarFrame",
 }
 
+-- Entries whose owning module hands the window back to the client under a
+-- native-chrome theme (core/theme.lua). That module then neither skins nor
+-- suppresses it -- but this list runs before any module and would hide it
+-- anyway, which is exactly how the pet bar came to be invisible while every
+-- other check said it was fine.
+--
+-- Only the casting bar so far: the unit frame and MainMenuBar entries stay,
+-- because modules/unitframes.lua and modules/actionbar.lua still build under
+-- Classic today. Each surface joins this set in the same commit that gives its
+-- module the bail-out.
+local NATIVE_CHROME_KEEPS = {
+  CastingBarFrame = true,
+}
+
 local function PunchCosmeticEarly()
   if U.db and U.db.noSuppress then return end
+
+  -- Resolved per pass rather than cached: this runs from the periodic batch as
+  -- well as at login, and the theme is settled long before either. See
+  -- core/init.lua, where U.LoadThemeStyle runs inside Initialise.
+  local nativeChrome = type(U.ThemeStyleUsesNativeChrome) == "function" and
+                       U.ThemeStyleUsesNativeChrome()
+
   local i
   for i = 1, table.getn(COSMETIC_EARLY) do
-    local object = ResolveNativeObject(COSMETIC_EARLY[i])
+    local name = COSMETIC_EARLY[i]
+    local object = nil
+    if not (nativeChrome and NATIVE_CHROME_KEEPS[name]) then
+      object = ResolveNativeObject(name)
+    end
     if object then
       pcall(ZeroAlpha, object)
       pcall(HideObject, object)
