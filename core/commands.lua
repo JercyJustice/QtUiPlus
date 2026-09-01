@@ -110,6 +110,7 @@ local function ShowHelp()
   U.Print("  |cffffff00/qtp profile|r - list, create, select, copy or delete a profile")
   U.Print("  |cffffff00/qtp theme|r - list or select the visual style")
   U.Print("  |cffffff00/qtp shift <n>|r - change to druid form n in one press")
+  U.Print("  |cffffff00/startattack|r, |cffffff00/stopattack|r - auto attack without toggling it off")
 end
 
 -- Unit API readout.
@@ -448,6 +449,20 @@ local function ShowSelfCheck()
     U.Print("    placed " .. tostring(pet.placed) ..
             ", driven by mover " .. tostring(pet.driving) ..
             ", native anchor captured " .. tostring(pet.nativeAnchorCaptured))
+  end
+
+  -- /startattack rests on reading a toggle back from the client. When it
+  -- misbehaves the question is always which half is missing: the Attack slot,
+  -- or the state report on it.
+  if type(U.StartAttackReport) == "function" then
+    local at = U.StartAttackReport()
+    U.Print("  start attack: slot " .. tostring(at.slot) ..
+            ", live " .. tostring(at.live) ..
+            ", state proven " .. tostring(at.liveStateProven))
+    U.Print("    IsAttackAction " .. tostring(at.isAttackAction) ..
+            ", IsCurrentAction " .. tostring(at.isCurrentAction) ..
+            ", AttackTarget " .. tostring(at.attackTarget) ..
+            ", native StartAttack " .. tostring(at.nativeStartAttack))
   end
 
   if type(U.MicroBarReport) == "function" then

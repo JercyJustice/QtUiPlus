@@ -37,6 +37,7 @@ both *installed* is harmless — but having both *enabled* is not.
 | `/qtp profile list\|create\|select\|copy\|delete\|reset <name>` | Layout profiles |
 | `/qtp theme <style>` | Visual style |
 | `/qtp shift <n>` | Change to druid form n in one press |
+| `/startattack`, `/stopattack` | Start or stop auto attack without toggling it off |
 | `/qtp check` | Runtime self-check |
 | `/qtp frames <text>` | Find stock frames by name and see which are still shown |
 | `/qtp debug` | Toggle debug output |
@@ -50,6 +51,10 @@ Everything QtUI had that the base did not:
 - **Equipped-item compare** — shows your equipped item beside an item tooltip.
 - **Creature health table** — real hit points for enemies reported as a percentage.
 - **Vendor prices** — static sell-price database behind the auto-sell totals.
+- **`/startattack` and `/stopattack`** — the client only has the toggling
+  `AttackTarget`, so a macro meant to make sure auto attack is running just as
+  happily stops the swing that already was. These read the real state back from
+  the Attack action instead, and never toggle it the wrong way.
 - **One-press druid forms** — switch straight from one form to another instead
   of dropping to caster form first. Pressing the form you are already in leaves
   it, and a press in the moment right after a shift lands is ignored, so

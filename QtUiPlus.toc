@@ -75,4 +75,5 @@ modules\profiles.lua
 modules\combopoints.lua
 modules\energytick.lua
 modules\smartshift.lua
+modules\startattack.lua
 modules\qtsettings.lua
