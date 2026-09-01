@@ -47,6 +47,7 @@ local config
 local xpAnchor, xpBar, xpRestedBar
 local xpLabelLayer, xpLabel
 local repAnchor, repBar
+local repLabelLayer, repLabel
 
 -- ---------------------------------------------------------------------------
 -- Config
@@ -204,6 +205,22 @@ local function Build()
     -- edit mode; see core/mover.lua / modules/microbar.lua.
     visible = function() return config and config.repEnabled end,
   })
+
+  -- Same layered treatment as the experience readout above, and for the same
+  -- reason: the fill is a sibling frame whose width changes on every refresh,
+  -- so a label on that layer can end up behind it.
+  repLabelLayer = CreateFrame("Frame", nil, repAnchor)
+  repLabelLayer:SetAllPoints(repAnchor)
+  local repLayerOk, repLayerLevel = pcall(repBar.GetFrameLevel, repBar)
+  if repLayerOk and tonumber(repLayerLevel) then
+    pcall(repLabelLayer.SetFrameLevel, repLabelLayer, repLayerLevel + 5)
+  end
+  repLabel = U.CreateLabel(repLabelLayer, {
+    size = M.fontSize.small,
+    color = M.color.text,
+    inherits = "GameFontNormalSmall",
+  })
+  if repLabel then repLabel:SetPoint("CENTER", repLabelLayer, "CENTER", 0, 0) end
 end
 
 -- Re-applies the configured geometry to bars that already exist. The fill is
@@ -240,6 +257,14 @@ local function ApplyGeometry()
   if xpLabel then
     U.SetFont(xpLabel, Number("fontSize"))
     if ShowText() then xpLabel:Show() else xpLabel:Hide() end
+  end
+
+  if repLabel then
+    U.SetFont(repLabel, Number("fontSize"))
+    -- Shown from RefreshReputation rather than here: with no watched faction
+    -- there is nothing to write, and an empty label on a bar that is drawn
+    -- empty anyway would just be a gap.
+    if not ShowText() then repLabel:Hide() end
   end
 end
 
@@ -307,6 +332,37 @@ local function RefreshXP()
   end
 end
 
+-- Standing name for the watched faction. FACTION_STANDING_LABEL1..8 are the
+-- client's own localised strings; a client that does not define them costs the
+-- word, not the readout.
+local function StandingLabel(standingID)
+  local id = tonumber(standingID)
+  if not id or id < 1 or id > 8 then return nil end
+  local label = U.G("FACTION_STANDING_LABEL" .. id)
+  if type(label) == "string" and label ~= "" then return label end
+  return nil
+end
+
+local function SetReputationText(name, standingID, value, maximum)
+  if not repLabel then return end
+
+  if not ShowText() or not name then
+    repLabel:Hide()
+    return
+  end
+
+  local percent = 0
+  if maximum > 0 then percent = math.floor(value / maximum * 100 + 0.5) end
+
+  local text = name
+  local standing = StandingLabel(standingID)
+  if standing then text = text .. ": " .. standing end
+  text = text .. "  " .. value .. " / " .. maximum .. "  (" .. percent .. "%)"
+
+  repLabel:SetText(text)
+  repLabel:Show()
+end
+
 local function RefreshReputation()
   if not repAnchor then return end
 
@@ -320,6 +376,7 @@ local function RefreshReputation()
   if type(getFactionInfo) ~= "function" then
     SetBar(repBar, 0, 1)
     U.SetStatusBarColor(repBar, M.Unpack(COLOR_REP_EMPTY))
+    SetReputationText(nil)
     return
   end
 
@@ -339,12 +396,16 @@ local function RefreshReputation()
   if not found then
     SetBar(repBar, 0, 1)
     U.SetStatusBarColor(repBar, M.Unpack(COLOR_REP_EMPTY))
+    -- No watched faction: the bar is drawn empty, so a label would be a
+    -- caption for nothing.
+    SetReputationText(nil)
     return
   end
 
   local maximum = (tonumber(barMax) or 1) - (tonumber(barMin) or 0)
   local value = (tonumber(barValue) or 0) - (tonumber(barMin) or 0)
   SetBar(repBar, value, maximum)
+  SetReputationText(name, standingID, value, maximum)
 
   local colors = U.G("FACTION_BAR_COLORS")
   local color = type(colors) == "table" and colors[standingID]
@@ -411,7 +472,7 @@ local function BuildSettingsPage(parent)
 
   local text = U.CreateCheckbox(parent, {
     name = "QtUiPlusXPBarText",
-    text = "Show experience text on the bar",
+    text = "Show text on the bars",
     value = U.GetXPBarSetting("showText"),
     onChange = function(value) U.SetXPBarSetting("showText", value) end,
   })
