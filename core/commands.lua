@@ -111,6 +111,8 @@ local function ShowHelp()
   U.Print("  |cffffff00/qtp theme|r - list or select the visual style")
   U.Print("  |cffffff00/qtp shift <n>|r - change to druid form n in one press")
   U.Print("  |cffffff00/startattack|r, |cffffff00/stopattack|r - auto attack without toggling it off")
+  U.Print("    also as |cffffff00/qtp startattack|r / |cffffff00/qtp stopattack|r")
+  U.Print("  |cffffff00/qtp macro|r - write a macro for one of those commands")
 end
 
 -- Unit API readout.
@@ -1676,6 +1678,206 @@ handlers["price"] = function()
     U.Print("  |cffff5555No setter has fired.|r Hover a bag item, then run " ..
             "this again. Bag slots go through SetBagItem after SetOwner " ..
             "(ANCHOR_RIGHT); equipped items through SetInventoryItem.")
+  end
+end
+
+-- ---------------------------------------------------------------------------
+-- Auto attack (modules/startattack.lua)
+--
+-- The module also registers plain /startattack and /stopattack. These are the
+-- same entry points under the addon prefix, for anyone who would rather keep
+-- every QtUiPlus command in one namespace, and so a macro can call either one.
+-- ---------------------------------------------------------------------------
+local function AttackCommand(fn, verb)
+  if type(fn) ~= "function" then
+    U.Print("auto attack commands are unavailable")
+    return
+  end
+
+  if fn() then return end
+
+  -- Nothing happened, and the two reasons are worth telling apart.
+  if not U.G("UnitExists") or
+     not U.G("AttackTarget") then
+    U.Print("this client does not expose the attack API")
+  else
+    U.Print("nothing to " .. verb .. ": no attackable target, or auto attack " ..
+            "is already in that state")
+  end
+end
+
+handlers["startattack"] = function()
+  AttackCommand(U.StartAttack, "start")
+end
+
+handlers["stopattack"] = function()
+  AttackCommand(U.StopAttack, "stop")
+end
+
+-- ---------------------------------------------------------------------------
+-- Macro maker
+--
+-- The attack commands are slash commands, so putting one on an action bar
+-- needs a macro. This writes it, rather than leaving the player to retype it.
+--
+-- Why it is a chat command and never automatic
+--
+--   emberveil.org/wiki/lua/globals/Macro: "CreateMacro, DeleteMacro, and
+--   EditMacro use a soft secure check (they error in some untrusted
+--   contexts)." The wiki does not say which contexts those are, so the call
+--   is made only in direct response to the player typing this, which is the
+--   most trusted context an addon gets -- and every call is wrapped, because
+--   "errors in some contexts" is exactly what a pcall is for.
+--
+--   Writing to someone's macro list is also not something an addon should do
+--   on its own. Eighteen account slots is a small, personal space.
+--
+-- Documented shapes used here, all from that page and the Cursor page:
+--   CreateMacro(name, iconIndex, body, unused, perCharacter) -> index or 0
+--   EditMacro(index, name, iconIndex, body)                  -> index
+--   GetMacroIndexByName(name)                                -> index or 0
+--   GetNumMacros()                                           -> account, character
+--   GetNumMacroIcons() / GetMacroIconInfo(i)                 -> count / path
+--   PickupMacro(index)  puts it on the cursor when the cursor is empty
+-- ---------------------------------------------------------------------------
+local MACRO_SPECS = {
+  startattack = {
+    name = "StartAttack",
+    body = "/startattack",
+    icon = "Ability_SteelMelee",
+  },
+  stopattack = {
+    name = "StopAttack",
+    body = "/stopattack",
+    icon = "Ability_Whirlwind",
+  },
+}
+
+local MACRO_ORDER = { "startattack", "stopattack" }
+
+-- Account macros hold 1-18, character macros 19-36.
+local MACROS_PER_LIST = 18
+
+local function MacroCall(name, a, b, c, d, e)
+  local fn = U.G(name)
+  if type(fn) ~= "function" then return nil, false end
+  local ok, value = pcall(fn, a, b, c, d, e)
+  if not ok then return nil, false end
+  return value, true
+end
+
+-- The icon is chosen by matching the shipped icon list rather than by writing
+-- down an index: the index of any given icon is a property of this client's
+-- icon table, not something an addon can assume.
+local function MacroIconIndex(want)
+  local count = tonumber(MacroCall("GetNumMacroIcons")) or 0
+  if count < 1 or not want then return 1 end
+
+  local i
+  for i = 1, count do
+    local path = MacroCall("GetMacroIconInfo", i)
+    if type(path) == "string" and string.find(path, want, 1, true) then
+      return i
+    end
+  end
+  return 1
+end
+
+-- Returns the list to create in: nil when both are full.
+local function FreeMacroList()
+  local account, character = nil, nil
+  local fn = U.G("GetNumMacros")
+  if type(fn) == "function" then
+    local ok, a, c = pcall(fn)
+    if ok then
+      account = tonumber(a)
+      character = tonumber(c)
+    end
+  end
+
+  -- An unreadable count is not treated as full: CreateMacro returns 0 when it
+  -- cannot place the macro, so the attempt itself is the fallback check.
+  if not account or account < MACROS_PER_LIST then return false end
+  if not character or character < MACROS_PER_LIST then return true end
+  return nil
+end
+
+local function MakeMacro(spec)
+  local existing = tonumber(MacroCall("GetMacroIndexByName", spec.name)) or 0
+  local iconIndex = MacroIconIndex(spec.icon)
+
+  if existing > 0 then
+    -- Rewritten rather than left alone: the body is what this command exists
+    -- to get right, and a stale one from an older version would be worse than
+    -- no macro at all.
+    local _, called = MacroCall("EditMacro", existing, spec.name, iconIndex, spec.body)
+    if not called then
+      return nil, "the client refused EditMacro"
+    end
+    return existing, nil, true
+  end
+
+  local perCharacter = FreeMacroList()
+  if perCharacter == nil then
+    return nil, "both macro lists are full (18 each)"
+  end
+
+  local index, called =
+    MacroCall("CreateMacro", spec.name, iconIndex, spec.body, nil, perCharacter)
+  if not called then
+    return nil, "the client refused CreateMacro"
+  end
+
+  index = tonumber(index) or 0
+  if index < 1 then
+    return nil, "the client returned no macro slot"
+  end
+  return index, nil, false
+end
+
+handlers["macro"] = function(rest)
+  local which = string.lower(Trim(rest or ""))
+
+  if which == "" then
+    U.Print("makes a macro for a QtUiPlus command:")
+    local i
+    for i = 1, table.getn(MACRO_ORDER) do
+      local spec = MACRO_SPECS[MACRO_ORDER[i]]
+      U.Print("  |cffffff00/qtp macro " .. MACRO_ORDER[i] .. "|r  -> " ..
+              spec.name .. " (" .. spec.body .. ")")
+    end
+    return
+  end
+
+  local spec = MACRO_SPECS[which]
+  if not spec then
+    U.Print("unknown macro |cffff5555" .. which ..
+            "|r - |cffffff00/qtp macro|r lists them")
+    return
+  end
+
+  if type(U.G("CreateMacro")) ~= "function" then
+    U.Print("this client does not expose CreateMacro")
+    return
+  end
+
+  local index, err, edited = MakeMacro(spec)
+  if not index then
+    U.Print("could not make the macro: " .. tostring(err))
+    return
+  end
+
+  U.Print((edited and "updated" or "created") .. " macro |cffffff00" ..
+          spec.name .. "|r (" .. spec.body .. ")")
+
+  -- Straight onto the cursor, so it can be dropped on a bar without opening
+  -- the macro window. Documented to do nothing when the cursor is not empty,
+  -- so a full cursor costs the convenience and nothing else.
+  local _, picked = MacroCall("PickupMacro", index)
+  if picked then
+    U.Print("  it is on your cursor - click an action bar slot to place it")
+  else
+    U.Print("  find it under |cffffff00Main Menu > Macros|r to place it")
   end
 end
 
