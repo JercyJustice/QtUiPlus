@@ -227,6 +227,34 @@ function U.StopAttack()
   return true
 end
 
+-- Acquire first, then attack.
+--
+-- /startattack deliberately never picks a target: that matches what the real
+-- command does, and a command that silently retargets is not one you want on
+-- a bar. This is the other half, for the opener macro -- run at something,
+-- press once, and swing:
+--
+--   /qtp attack
+--   /cast Maul
+--
+-- TargetNearestEnemy is documented on this client (emberveil.org/wiki/lua/
+-- globals/Targetting): "Repeated calls cycle among nearby enemies in front of
+-- the player. Dead units are skipped."
+--
+-- That cycling is why the call is made only when there is nothing attackable
+-- to begin with. Calling it on every press would walk the target off the mob
+-- being fought and onto its neighbour, which is the opposite of what an opener
+-- macro is for. A dead or friendly target counts as nothing attackable, so the
+-- next press after a kill picks up the next mob.
+function U.AttackNearest()
+  if not TargetIsAttackable() then
+    Call("TargetNearestEnemy")
+  end
+  -- Re-checked inside: the call above finds nothing when no enemy is in front,
+  -- and this must not swing at a target that was never acquired.
+  return U.StartAttack()
+end
+
 -- Reported by /qtp check.
 function U.StartAttackReport()
   return {
@@ -235,6 +263,7 @@ function U.StartAttackReport()
     isCurrentAction = type(U.G("IsCurrentAction")) == "function",
     attackTarget = type(U.G("AttackTarget")) == "function",
     nativeStartAttack = type(U.G("StartAttack")) == "function",
+    targetNearestEnemy = type(U.G("TargetNearestEnemy")) == "function",
     liveStateProven = liveStateProven,
     live = LiveAttackState(),
     believeAttacking = believeAttacking,
@@ -277,6 +306,7 @@ function SA:OnEnable()
   -- fight has usually already established that the pair reports true.
   U.RegisterEvent("PLAYER_ENTER_COMBAT", function() LiveAttackState() end)
 
+  U.SetG("QtUiPlusAttackNearest", U.AttackNearest)
   U.SetG("QtUiPlusStartAttack", U.StartAttack)
   U.SetG("QtUiPlusStopAttack", U.StopAttack)
 

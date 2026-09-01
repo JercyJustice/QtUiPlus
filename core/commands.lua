@@ -112,6 +112,7 @@ local function ShowHelp()
   U.Print("  |cffffff00/qtp shift <n>|r - change to druid form n in one press")
   U.Print("  |cffffff00/startattack|r, |cffffff00/stopattack|r - auto attack without toggling it off")
   U.Print("    also as |cffffff00/qtp startattack|r / |cffffff00/qtp stopattack|r")
+  U.Print("  |cffffff00/qtp attack|r - target the nearest enemy if needed, then attack")
   U.Print("  |cffffff00/qtp macro|r - write a macro for one of those commands")
 end
 
@@ -464,7 +465,8 @@ local function ShowSelfCheck()
     U.Print("    IsAttackAction " .. tostring(at.isAttackAction) ..
             ", IsCurrentAction " .. tostring(at.isCurrentAction) ..
             ", AttackTarget " .. tostring(at.attackTarget) ..
-            ", native StartAttack " .. tostring(at.nativeStartAttack))
+            ", native StartAttack " .. tostring(at.nativeStartAttack) ..
+            ", TargetNearestEnemy " .. tostring(at.targetNearestEnemy))
   end
 
   if type(U.MicroBarReport) == "function" then
@@ -1704,6 +1706,12 @@ end
 
 handlers["stopattack"] = function()
   AttackCommand(U.StopAttack)
+end
+
+-- The opener: picks the nearest enemy when there is nothing attackable, then
+-- starts the swing. /qtp startattack deliberately does not do this.
+handlers["attack"] = function()
+  AttackCommand(U.AttackNearest)
 end
 
 -- ---------------------------------------------------------------------------

@@ -39,6 +39,7 @@ both *installed* is harmless — but having both *enabled* is not.
 | `/qtp shift <n>` | Change to druid form n in one press |
 | `/startattack`, `/stopattack` | Start or stop auto attack without toggling it off |
 | `/qtp startattack`, `/qtp stopattack` | The same, under the addon prefix |
+| `/qtp attack` | Target the nearest enemy if there is none, then attack |
 | `/qtp macro <name>` | Write a macro for one of those commands and put it on the cursor |
 | `/qtp check` | Runtime self-check |
 | `/qtp frames <text>` | Find stock frames by name and see which are still shown |
