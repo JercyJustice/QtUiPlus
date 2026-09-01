@@ -246,12 +246,28 @@ end
 -- being fought and onto its neighbour, which is the opposite of what an opener
 -- macro is for. A dead or friendly target counts as nothing attackable, so the
 -- next press after a kill picks up the next mob.
+-- Sticky by construction: a live, attackable target is never traded for
+-- another. Only when there is nothing worth attacking -- no target, a dead
+-- one, or a friendly one -- is a new one picked up. So a press mid-fight keeps
+-- you on the mob you are killing, and the first press after it dies moves you
+-- to the next.
+--
+-- Returns true when there is an attackable target afterwards, however it got
+-- there.
+function U.TargetNearest()
+  if TargetIsAttackable() then return true end
+
+  Call("TargetNearestEnemy")
+
+  -- Re-checked rather than assumed: the call finds nothing when no enemy is in
+  -- front of the player, and it reports nothing back either way.
+  return TargetIsAttackable()
+end
+
 function U.AttackNearest()
-  if not TargetIsAttackable() then
-    Call("TargetNearestEnemy")
-  end
-  -- Re-checked inside: the call above finds nothing when no enemy is in front,
-  -- and this must not swing at a target that was never acquired.
+  U.TargetNearest()
+  -- StartAttack re-checks the target itself, so a failed acquire cannot make
+  -- this swing at nothing.
   return U.StartAttack()
 end
 
@@ -306,6 +322,7 @@ function SA:OnEnable()
   -- fight has usually already established that the pair reports true.
   U.RegisterEvent("PLAYER_ENTER_COMBAT", function() LiveAttackState() end)
 
+  U.SetG("QtUiPlusTargetNearest", U.TargetNearest)
   U.SetG("QtUiPlusAttackNearest", U.AttackNearest)
   U.SetG("QtUiPlusStartAttack", U.StartAttack)
   U.SetG("QtUiPlusStopAttack", U.StopAttack)

@@ -113,6 +113,7 @@ local function ShowHelp()
   U.Print("  |cffffff00/startattack|r, |cffffff00/stopattack|r - auto attack without toggling it off")
   U.Print("    also as |cffffff00/qtp startattack|r / |cffffff00/qtp stopattack|r")
   U.Print("  |cffffff00/qtp attack|r - target the nearest enemy if needed, then attack")
+  U.Print("  |cffffff00/qtp firsttarget|r - target the nearest enemy, keep it until it dies")
   U.Print("  |cffffff00/qtp macro|r - write a macro for one of those commands")
 end
 
@@ -1712,6 +1713,12 @@ end
 -- starts the swing. /qtp startattack deliberately does not do this.
 handlers["attack"] = function()
   AttackCommand(U.AttackNearest)
+end
+
+-- The targeting half on its own, for a macro that wants the target without
+-- committing to auto attack.
+handlers["firsttarget"] = function()
+  AttackCommand(U.TargetNearest)
 end
 
 -- ---------------------------------------------------------------------------

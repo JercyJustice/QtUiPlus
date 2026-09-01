@@ -40,6 +40,7 @@ both *installed* is harmless — but having both *enabled* is not.
 | `/startattack`, `/stopattack` | Start or stop auto attack without toggling it off |
 | `/qtp startattack`, `/qtp stopattack` | The same, under the addon prefix |
 | `/qtp attack` | Target the nearest enemy if there is none, then attack |
+| `/qtp firsttarget` | Target the nearest enemy and keep it until it dies |
 | `/qtp macro <name>` | Write a macro for one of those commands and put it on the cursor |
 | `/qtp check` | Runtime self-check |
 | `/qtp frames <text>` | Find stock frames by name and see which are still shown |
