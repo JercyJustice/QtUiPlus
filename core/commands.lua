@@ -1688,7 +1688,7 @@ handlers["shift"] = function(rest)
   if U.SmartShift(index) then return end
 
   if type(U.GetSmartShiftSetting) == "function" and
-     not U.GetSmartShiftSetting() then
+     not U.GetSmartShiftSetting("enabled") then
     U.Print("one-press form changes are off - Stance Bar settings, or " ..
             "|cffffff00/qtp|r")
   elseif type(U.SmartShiftAvailable) == "function" and

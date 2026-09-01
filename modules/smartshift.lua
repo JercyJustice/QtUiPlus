@@ -17,12 +17,19 @@
 --
 --   * press while in another form -> that form is cancelled, the target is
 --     entered once caster form has held for STABLE_SECONDS
---   * press while already in the target form -> nothing, so a keybind or a
---     macro is spam-safe and never toggles the form off by accident
---   * Ctrl+press while in the target form -> leaves it deliberately
+--   * press while already in the target form -> leaves it, or does nothing at
+--     all when exitOnRepress is off, which is the original addon behaviour and
+--     what makes a keybind or a macro safe to hold down
+--   * Ctrl+press while in the target form -> leaves it deliberately, whatever
+--     exitOnRepress is set to
 --   * a form chosen by hand mid-transition supersedes the queued request
 --   * a transition that never completes is abandoned after TIMEOUT_SECONDS
 --     rather than firing late, when the player has moved on
+--
+-- Leaving a form by pressing its button again is an addition, not a port. The
+-- original removed exactly that so a held key could never toggle the form off;
+-- it is kept switchable here for the same reason, and the guard below means
+-- having it on does not bring the problem back with it.
 --
 -- Two deliberate differences from the original
 --
@@ -56,11 +63,23 @@ local STABLE_SECONDS = 0.10
 local TIMEOUT_SECONDS = 2
 
 local DEFAULTS = {
-  enabled = false,   -- opt-in: it changes what a form button press does
+  enabled = false,        -- opt-in: it changes what a form button press does
+  exitOnRepress = true,   -- press the form you are in again to leave it
 }
+
+-- How long after arriving in a form a plain press is ignored when
+-- exitOnRepress is on. Without it the feature fights itself: a player who
+-- spams the button through a transition would land in the form and be thrown
+-- straight back out by their own next press. A deliberate press later still
+-- leaves. Ctrl ignores this entirely -- that route is never accidental.
+local REPRESS_GUARD_SECONDS = 0.5
 
 local cfg
 local pending
+-- Which form this module last saw taken, and when. The form is part of it so
+-- a stamp left by one form cannot suppress the first press on another.
+local enteredForm
+local enteredAt
 local isDruid = false
 local classKnown = false
 
@@ -191,6 +210,9 @@ local function Tick()
   local active = ActiveForm()
 
   if active == pending.target then
+    -- Stamped here rather than at the cast: this is the tick that observed the
+    -- form actually take, which is what the re-press guard has to measure from.
+    enteredForm, enteredAt = pending.target, now
     ClearPending()
     return
   end
@@ -240,14 +262,31 @@ function U.SmartShift(index)
   local ctrl = Call("IsControlKeyDown")
   if ctrl then
     ClearPending()
-    if active == index then CastForm(index) end
+    if active == index then
+      enteredForm, enteredAt = nil, nil
+      CastForm(index)
+    end
     return true
   end
 
-  -- Already there: do nothing at all. This is what makes a keybind or a macro
-  -- safe to hold down.
+  -- Already in the requested form.
   if active == index then
     ClearPending()
+
+    -- With exitOnRepress off this is the original behaviour: nothing happens,
+    -- so a keybind or a macro is safe to hold down and Ctrl is the only way
+    -- out. With it on, a second press leaves the form -- but not one that
+    -- arrives in the moment right after the shift landed, which is a player
+    -- still spamming the button rather than asking to leave.
+    if cfg.exitOnRepress then
+      local now = Now()
+      local fresh = enteredAt and enteredForm == index and now and
+                    (now - enteredAt) < REPRESS_GUARD_SECONDS
+      if not fresh then
+        enteredForm, enteredAt = nil, nil
+        CastForm(index)
+      end
+    end
     return true
   end
 
@@ -288,15 +327,21 @@ end
 -- ---------------------------------------------------------------------------
 -- Settings surface, used by the Stance Bar page and /qtp check
 -- ---------------------------------------------------------------------------
-function U.GetSmartShiftSetting()
-  if not cfg then return DEFAULTS.enabled end
-  return cfg.enabled and true or false
+-- Keyed so the page can drive both switches through one pair. An unknown key
+-- reports false rather than nil, so a caller cannot accidentally read a
+-- missing setting as "on".
+function U.GetSmartShiftSetting(key)
+  key = key or "enabled"
+  if DEFAULTS[key] == nil then return false end
+  if not cfg then return DEFAULTS[key] and true or false end
+  return cfg[key] and true or false
 end
 
-function U.SetSmartShiftSetting(value)
-  if not cfg then return end
-  cfg.enabled = value and true or false
-  if not cfg.enabled then ClearPending() end
+function U.SetSmartShiftSetting(key, value)
+  key = key or "enabled"
+  if not cfg or DEFAULTS[key] == nil then return end
+  cfg[key] = value and true or false
+  if key == "enabled" and not cfg.enabled then ClearPending() end
 end
 
 -- Whether the option can do anything for this character, so the settings page

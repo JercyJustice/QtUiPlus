@@ -500,13 +500,13 @@ local function BuildSettingsPage(parent)
   -- One-press form changes (modules/smartshift.lua). It lives on this page
   -- because it is about forms, but it works from a keybind or a macro whether
   -- or not this bar is shown -- see the hint below.
-  local smart
+  local smart, exitSmart
   if type(U.GetSmartShiftSetting) == "function" then
     smart = U.CreateCheckbox(parent, {
       name = "QtUiPlusStanceBarSmartShift",
       text = "One-press form changes",
-      value = U.GetSmartShiftSetting(),
-      onChange = function(value) U.SetSmartShiftSetting(value) end,
+      value = U.GetSmartShiftSetting("enabled"),
+      onChange = function(value) U.SetSmartShiftSetting("enabled", value) end,
     })
     smart.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -240)
     table.insert(widgets, smart)
@@ -533,11 +533,39 @@ local function BuildSettingsPage(parent)
       end
       table.insert(widgets, smartHint)
     end
+
+    exitSmart = U.CreateCheckbox(parent, {
+      name = "QtUiPlusStanceBarSmartShiftExit",
+      text = "Press again to leave the form",
+      value = U.GetSmartShiftSetting("exitOnRepress"),
+      onChange = function(value)
+        U.SetSmartShiftSetting("exitOnRepress", value)
+      end,
+    })
+    exitSmart.SetPoint("TOPLEFT", parent, "TOPLEFT", 14, -302)
+    table.insert(widgets, exitSmart)
+
+    local exitHint = U.CreateSettingsLabel(parent, {
+      size = M.fontSize.small, color = M.color.textDim,
+      inherits = "GameFontNormalSmall", justify = "LEFT",
+    })
+    if exitHint then
+      U.AnchorSettingsDescription(exitHint, exitSmart.box)
+      exitHint:SetText("On: the button toggles, but a press in the moment " ..
+                       "right after a shift lands is ignored, so spamming it " ..
+                       "through a transition cannot throw you back out. Off: " ..
+                       "only Ctrl leaves a form, which is safest for a held " ..
+                       "keybind.")
+      table.insert(widgets, exitHint)
+    end
   end
 
   local function Refresh()
     enable.SetValue(U.GetStanceBarSetting("enabled"))
-    if smart then smart.SetValue(U.GetSmartShiftSetting()) end
+    if smart then smart.SetValue(U.GetSmartShiftSetting("enabled")) end
+    if exitSmart then
+      exitSmart.SetValue(U.GetSmartShiftSetting("exitOnRepress"))
+    end
     local j
     for j = 1, table.getn(SLIDERS) do
       local key = SLIDERS[j].key
