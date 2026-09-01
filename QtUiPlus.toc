@@ -74,4 +74,5 @@ modules\chatextras.lua
 modules\profiles.lua
 modules\combopoints.lua
 modules\energytick.lua
+modules\smartshift.lua
 modules\qtsettings.lua

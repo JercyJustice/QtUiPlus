@@ -109,6 +109,7 @@ local function ShowHelp()
   U.Print("  |cffffff00/qtp price|r - why a vendor price is or is not on tooltips")
   U.Print("  |cffffff00/qtp profile|r - list, create, select, copy or delete a profile")
   U.Print("  |cffffff00/qtp theme|r - list or select the visual style")
+  U.Print("  |cffffff00/qtp shift <n>|r - change to druid form n in one press")
 end
 
 -- Unit API readout.
@@ -1660,6 +1661,41 @@ handlers["price"] = function()
     U.Print("  |cffff5555No setter has fired.|r Hover a bag item, then run " ..
             "this again. Bag slots go through SetBagItem after SetOwner " ..
             "(ANCHOR_RIGHT); equipped items through SetInventoryItem.")
+  end
+end
+
+-- ---------------------------------------------------------------------------
+-- One-press form changes (modules/smartshift.lua)
+--
+-- Same entry point a macro calls, so a player can try the behaviour before
+-- writing one. The feature reports whether it took the press, which is what
+-- separates "switched off" from "this class has nothing to smooth".
+-- ---------------------------------------------------------------------------
+handlers["shift"] = function(rest)
+  if type(U.SmartShift) ~= "function" then
+    U.Print("one-press form changes are unavailable")
+    return
+  end
+
+  local index = tonumber(Trim(rest or ""))
+  if not index then
+    U.Print("usage: |cffffff00/qtp shift <form number>|r")
+    U.Print("  the number is the form position on the stance bar")
+    U.Print("  macros can call |cffffff00/run SmartShift(2)|r")
+    return
+  end
+
+  if U.SmartShift(index) then return end
+
+  if type(U.GetSmartShiftSetting) == "function" and
+     not U.GetSmartShiftSetting() then
+    U.Print("one-press form changes are off - Stance Bar settings, or " ..
+            "|cffffff00/qtp|r")
+  elseif type(U.SmartShiftAvailable) == "function" and
+         not U.SmartShiftAvailable() then
+    U.Print("one-press form changes are druid only")
+  else
+    U.Print("no form " .. tostring(index) .. " on the stance bar")
   end
 end
 

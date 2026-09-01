@@ -158,7 +158,15 @@ local function ApplyBorder(button)
   end
 end
 
+-- modules/smartshift.lua takes the press only when it is switched on and can
+-- actually help (a druid with more than one form). It reports that back, so
+-- every other class and the switched-off case keep the plain client call and
+-- this module needs no class test of its own -- see the header on why the form
+-- count, not the class, is this module's gate.
 local function OnButtonClick(button)
+  if type(U.SmartShift) == "function" and U.SmartShift(button.qtpIndex) then
+    return
+  end
   Call("CastShapeshiftForm", button.qtpIndex)
 end
 
@@ -489,8 +497,47 @@ local function BuildSettingsPage(parent)
     table.insert(widgets, hint)
   end
 
+  -- One-press form changes (modules/smartshift.lua). It lives on this page
+  -- because it is about forms, but it works from a keybind or a macro whether
+  -- or not this bar is shown -- see the hint below.
+  local smart
+  if type(U.GetSmartShiftSetting) == "function" then
+    smart = U.CreateCheckbox(parent, {
+      name = "QtUiPlusStanceBarSmartShift",
+      text = "One-press form changes",
+      value = U.GetSmartShiftSetting(),
+      onChange = function(value) U.SetSmartShiftSetting(value) end,
+    })
+    smart.SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -240)
+    table.insert(widgets, smart)
+
+    local smartHint = U.CreateSettingsLabel(parent, {
+      size = M.fontSize.small, color = M.color.textDim,
+      inherits = "GameFontNormalSmall", justify = "LEFT",
+    })
+    if smartHint then
+      U.AnchorSettingsDescription(smartHint, smart.box)
+      -- The switch is offered to everyone but only does something for a druid,
+      -- so a non-druid is told that here rather than left wondering.
+      if type(U.SmartShiftAvailable) == "function" and
+         not U.SmartShiftAvailable() then
+        smartHint:SetText("Druid only. Leaving one form and entering another " ..
+                          "are separate steps on this client; other classes " ..
+                          "change stance in one.")
+      else
+        smartHint:SetText("Switch straight from one form to another with a " ..
+                          "single press, instead of dropping to caster form " ..
+                          "first. A press never toggles the form you are " ..
+                          "already in -- hold Ctrl to leave it. Works from " ..
+                          "keybinds and from /run SmartShift(2) macros.")
+      end
+      table.insert(widgets, smartHint)
+    end
+  end
+
   local function Refresh()
     enable.SetValue(U.GetStanceBarSetting("enabled"))
+    if smart then smart.SetValue(U.GetSmartShiftSetting()) end
     local j
     for j = 1, table.getn(SLIDERS) do
       local key = SLIDERS[j].key

@@ -36,6 +36,7 @@ both *installed* is harmless — but having both *enabled* is not.
 | `/qtp bind` | Quick binding |
 | `/qtp profile list\|create\|select\|copy\|delete\|reset <name>` | Layout profiles |
 | `/qtp theme <style>` | Visual style |
+| `/qtp shift <n>` | Change to druid form n in one press |
 | `/qtp check` | Runtime self-check |
 | `/qtp frames <text>` | Find stock frames by name and see which are still shown |
 | `/qtp debug` | Toggle debug output |
@@ -49,6 +50,10 @@ Everything QtUI had that the base did not:
 - **Equipped-item compare** — shows your equipped item beside an item tooltip.
 - **Creature health table** — real hit points for enemies reported as a percentage.
 - **Vendor prices** — static sell-price database behind the auto-sell totals.
+- **One-press druid forms** — switch straight from one form to another
+  instead of dropping to caster form first, without a press ever toggling the
+  form you are already in. Off by default; Stance Bar settings. Ported from
+  [SmartShapeshift](https://github.com/robertwallin86/SmartShapeshift).
 - **Chat extras** — timestamps, class-coloured names, working mouse-wheel scrolling.
 - **Clock and bag space** — added to the existing status strip.
 - **Profiles** — named, account-wide settings profiles. Each character
