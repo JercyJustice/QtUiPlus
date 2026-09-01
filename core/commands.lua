@@ -1688,30 +1688,22 @@ end
 -- same entry points under the addon prefix, for anyone who would rather keep
 -- every QtUiPlus command in one namespace, and so a macro can call either one.
 -- ---------------------------------------------------------------------------
-local function AttackCommand(fn, verb)
-  if type(fn) ~= "function" then
-    U.Print("auto attack commands are unavailable")
-    return
-  end
-
-  if fn() then return end
-
-  -- Nothing happened, and the two reasons are worth telling apart.
-  if not U.G("UnitExists") or
-     not U.G("AttackTarget") then
-    U.Print("this client does not expose the attack API")
-  else
-    U.Print("nothing to " .. verb .. ": no attackable target, or auto attack " ..
-            "is already in that state")
-  end
+-- Silent by design. These sit on a keybind or in a macro and are pressed
+-- constantly, most often in the state where the right answer is to do
+-- nothing -- saying so every time would be chat spam, not feedback. Nothing
+-- here can fail in a way the player needs told about mid-fight; /qtp check
+-- reports the state when something really is wrong.
+local function AttackCommand(fn)
+  if type(fn) ~= "function" then return end
+  fn()
 end
 
 handlers["startattack"] = function()
-  AttackCommand(U.StartAttack, "start")
+  AttackCommand(U.StartAttack)
 end
 
 handlers["stopattack"] = function()
-  AttackCommand(U.StopAttack, "stop")
+  AttackCommand(U.StopAttack)
 end
 
 -- ---------------------------------------------------------------------------

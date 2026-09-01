@@ -239,7 +239,10 @@ local function Tick()
 
   if (now - pending.startedAt) >= TIMEOUT_SECONDS then
     ClearPending()
-    U.Print("form change cancelled: the target form did not become available")
+    -- Debug, not chat: this fires on a form change that did not take, which is
+    -- something the player already saw happen. Announcing it in the middle of
+    -- a fight adds noise, not information.
+    U.Debug("smartshift: target form did not become available; transition dropped")
   end
 end
 
